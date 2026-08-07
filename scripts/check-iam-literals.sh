@@ -64,6 +64,7 @@ readonly -a REQUIRED_PLACEHOLDERS=(
     '<repository-id>'
     '<owner-id>'
     '<region>'
+    '<vpc-id>'
     '<sso-permission-set>'
 )
 
