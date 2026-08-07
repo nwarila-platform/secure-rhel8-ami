@@ -203,6 +203,20 @@
           "ec2:CreateAction": "CreateSnapshot"
         }
       }
+    },
+    {
+      "Sid": "SurrogateSnapshotVolumeLegEncrypted",
+      "Effect": "Allow",
+      "Action": "ec2:CreateSnapshot",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:volume/*",
+      "Condition": {
+        "Bool": {
+          "ec2:Encrypted": "true"
+        },
+        "NumericLessThanEquals": {
+          "ec2:VolumeSize": 30
+        }
+      }
     }
   ]
 }
