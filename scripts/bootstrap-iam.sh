@@ -71,6 +71,8 @@ OWNER_ID="$(gh api "orgs/${OWNER}" --jq .id)" || die "cannot resolve owner id fo
 VPC_ID="$(aws ec2 describe-vpcs "${AWSARGS[@]}" --query 'Vpcs[0].VpcId' --output text)" || die 'cannot resolve VPC'
 SUBNET_ID="$(sed -n 's/^ *subnet_id *= *"\(subnet-[a-f0-9]*\)".*/\1/p' "${ROOT}/packer/systems.auto.pkrvars.hcl" | head -1)"
 [ -n "${SUBNET_ID}" ] || die 'cannot resolve subnet_id from packer/systems.auto.pkrvars.hcl'
+AMI_OWNER="$(sed -n 's/^ *owners *= *\["\([0-9]*\)"\].*/\1/p' "${ROOT}/packer/systems.auto.pkrvars.hcl" | head -1)"
+[ -n "${AMI_OWNER}" ] || die 'cannot resolve source AMI owner from packer/systems.auto.pkrvars.hcl'
 SSO_PS="${SSO_PERMISSION_SET:-AdministratorAccess}"
 say 'account / region' "${ACCOUNT} / ${REGION}"
 say 'repository id / owner id' "${REPO_ID} / ${OWNER_ID}"
@@ -81,7 +83,7 @@ mkdir -p "${WORK}/policies" "${WORK}/roles"
 cp "${IAM_DIR}/policies/"*.json "${WORK}/policies/"
 cp "${IAM_DIR}/roles/"*.json    "${WORK}/roles/"
 sed -i "s|<account-id>|${ACCOUNT}|g; s|<repository-id>|${REPO_ID}|g; s|<owner-id>|${OWNER_ID}|g;
-        s|<region>|${REGION}|g; s|<vpc-id>|${VPC_ID}|g; s|<subnet-id>|${SUBNET_ID}|g; s|<sso-permission-set>|${SSO_PS}|g" \
+        s|<region>|${REGION}|g; s|<vpc-id>|${VPC_ID}|g; s|<subnet-id>|${SUBNET_ID}|g; s|<source-ami-owner>|${AMI_OWNER}|g; s|<sso-permission-set>|${SSO_PS}|g" \
         "${WORK}"/policies/*.json "${WORK}"/roles/*.json
 
 "${ROOT}/scripts/check-iam-literals.sh" --materialized "${WORK}" >/dev/null \
