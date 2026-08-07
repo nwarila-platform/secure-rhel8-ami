@@ -35,8 +35,11 @@
       ansible.builtin.raw: timeout 300 cloud-init status --wait || true
       changed_when: false
 
-    - name: Ensure python3 is present for Ansible modules
-      ansible.builtin.raw: command -v /usr/bin/python3 >/dev/null 2>&1 || dnf install -y python3
+    # Stock python3 on RHEL 8 is 3.6, below ansible-core 2.20's target floor; AppStream's
+    # python3.12 is installed instead and pinned via ansible_python_interpreter in
+    # systems.auto.pkrvars.hcl. It stays in the image for post-build Ansible runs.
+    - name: Ensure python3.12 is present for Ansible modules
+      ansible.builtin.raw: command -v /usr/bin/python3.12 >/dev/null 2>&1 || dnf install -y python3.12
       changed_when: false
 
 - name: RHEL 8 Bootstrap and Hardening
