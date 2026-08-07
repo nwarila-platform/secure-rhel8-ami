@@ -96,8 +96,8 @@ jobs:
           fetch-depth: 1
           path: aws-packer-framework
           persist-credentials: false
-          # feat: amazon-ebssurrogate source for custom partition layouts (#1)
-          ref: 3dbc496ae77cbedfe54486bcce9e566503523db6
+          # fix: proxyless SSH Ansible provisioner (#2)
+          ref: 4302430ca46a7db69192dc66b77a37c9c26ce238
           repository: nwarila-platform/aws-packer-framework
 
       - name: Checkout Ansible Framework Repository
