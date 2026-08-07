@@ -7,14 +7,18 @@
       "Action": [
         "ec2:DescribeImages",
         "ec2:DescribeRegions",
+        "ec2:DescribeSecurityGroups",
         "ec2:DescribeSubnets"
       ],
       "Resource": "*"
     },
     {
-      "Sid": "TemporaryKeyPairCreate",
+      "Sid": "TemporaryKeyPairLifecycle",
       "Effect": "Allow",
-      "Action": "ec2:CreateKeyPair",
+      "Action": [
+        "ec2:CreateKeyPair",
+        "ec2:DeleteKeyPair"
+      ],
       "Resource": "arn:aws:ec2:<region>:<account-id>:key-pair/packer_*"
     },
     {
