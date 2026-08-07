@@ -23,6 +23,22 @@
 # task-scoped transport and privilege settings.                                                 #
 # ============================================================================================= #
 
+- name: Wait For Cloud-Init and Ensure a Module Interpreter
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    # Packer's SSH connect races cloud-init's package stage, and stock RHEL 8 AMIs ship
+    # only platform-python. raw needs no interpreter, so it can settle first boot and
+    # guarantee /usr/bin/python3 before any real module runs.
+    - name: Wait for cloud-init to finish first boot
+      ansible.builtin.raw: timeout 300 cloud-init status --wait || true
+      changed_when: false
+
+    - name: Ensure python3 is present for Ansible modules
+      ansible.builtin.raw: command -v /usr/bin/python3 >/dev/null 2>&1 || dnf install -y python3
+      changed_when: false
+
 - name: RHEL 8 Bootstrap and Hardening
   hosts: all
   gather_facts: false
