@@ -16,6 +16,7 @@
         "ec2:DeleteVolume",
         "ec2:DeregisterImage",
         "ec2:Describe*",
+        "ec2:ModifyImageAttribute",
         "ec2:ModifyInstanceAttribute",
         "ec2:RegisterImage",
         "ec2:RevokeSecurityGroupIngress",
