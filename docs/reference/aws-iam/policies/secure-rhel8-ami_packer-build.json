@@ -32,12 +32,7 @@
       "Sid": "TemporarySecurityGroupCreateInPinnedVpc",
       "Effect": "Allow",
       "Action": "ec2:CreateSecurityGroup",
-      "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*",
-      "Condition": {
-        "ArnEquals": {
-          "ec2:Vpc": "arn:aws:ec2:<region>:<account-id>:vpc/<vpc-id>"
-        }
-      }
+      "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*"
     },
     {
       "Sid": "TemporarySecurityGroupVpcLeg",
