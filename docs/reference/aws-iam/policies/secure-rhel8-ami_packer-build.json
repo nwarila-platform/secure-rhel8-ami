@@ -15,6 +15,17 @@
       "Effect": "Allow",
       "Action": "ec2:CreateKeyPair",
       "Resource": "arn:aws:ec2:<region>:<account-id>:key-pair/packer_*"
+    },
+    {
+      "Sid": "TagKeyPairOnCreate",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:key-pair/packer_*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:CreateAction": "CreateKeyPair"
+        }
+      }
     }
   ]
 }
