@@ -86,6 +86,19 @@
           "ec2:MetadataHttpPutResponseHopLimit": 1
         }
       }
+    },
+    {
+      "Sid": "TagOnLaunch",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": [
+        "arn:aws:ec2:<region>:<account-id>:instance/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "ec2:CreateAction": "RunInstances"
+        }
+      }
     }
   ]
 }
