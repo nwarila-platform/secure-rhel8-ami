@@ -6,6 +6,7 @@
       "Effect": "Allow",
       "Action": [
         "ec2:DescribeImages",
+        "ec2:DescribeInstances",
         "ec2:DescribeRegions",
         "ec2:DescribeSecurityGroups",
         "ec2:DescribeSubnets"
@@ -157,6 +158,20 @@
       "Condition": {
         "StringEquals": {
           "aws:ResourceAccount": "<source-ami-owner>"
+        }
+      }
+    },
+    {
+      "Sid": "InstanceLifecycleOnlyOurs",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StopInstances",
+        "ec2:TerminateInstances"
+      ],
+      "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
         }
       }
     }
