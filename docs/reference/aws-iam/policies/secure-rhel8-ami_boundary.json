@@ -2,7 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "BuildRoleCeilingEc2InRegion",
+      "Sid": "BuildCeilingEc2InRegion",
       "Effect": "Allow",
       "Action": [
         "ec2:AuthorizeSecurityGroupIngress",
@@ -29,6 +29,42 @@
           "aws:RequestedRegion": "<region>"
         }
       }
+    },
+    {
+      "Sid": "IamCeilingBuildPolicyOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreatePolicy",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions",
+        "iam:TagPolicy"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:policy/secure-rhel8-ami_packer-build"
+    },
+    {
+      "Sid": "IamCeilingBuildRoleOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:CreateRole",
+        "iam:DetachRolePolicy",
+        "iam:GetRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:PutRolePermissionsBoundary",
+        "iam:TagRole",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:role/github_nwarila-platform_secure-rhel8-ami"
+    },
+    {
+      "Sid": "IamCeilingValidation",
+      "Effect": "Allow",
+      "Action": "access-analyzer:ValidatePolicy",
+      "Resource": "*"
     }
   ]
 }

@@ -19,7 +19,8 @@
             "repo:nwarila-platform/secure-rhel8-ami:*"
           ],
           "token.actions.githubusercontent.com:job_workflow_ref": [
-            "nwarila-platform/secure-rhel8-ami/.github/workflows/packer.yaml@*"
+            "nwarila-platform/secure-rhel8-ami/.github/workflows/packer.yaml@*",
+            "nwarila-platform/secure-rhel8-ami/.github/workflows/iam.yml@*"
           ]
         }
       }

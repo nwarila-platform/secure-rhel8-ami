@@ -10,20 +10,32 @@ assumes a dedicated management role via OIDC and runs `scripts/bootstrap-iam.sh`
 substitution gate → Access Analyzer → plan/apply/check-drift, weekly scheduled drift detection).
 Only the governance layer stays operator-applied.
 
-## Two tiers
+## Two roles, two tiers
+
+Exactly two roles exist: the **non-admin** role GitHub assumes and the **-admin** role the
+operator personally assumes through the organization SSO broker.
 
 | Tier | Objects | Applied by | Why |
 |---|---|---|---|
-| repo | `secure-rhel8-ami_packer-build` policy · `github_nwarila-platform_secure-rhel8-ami` role (trust, boundary attachment, policy attachment) | `iam.yml` → `bootstrap-iam.sh --tier repo` via OIDC | Day-to-day IAM changes ride PRs and the workflow |
-| operator | `secure-rhel8-ami_boundary` · `secure-rhel8-ami_iam-manage` · `github_nwarila-platform_secure-rhel8-ami-iam` role | `bootstrap-iam.sh --tier operator --profile <sso>` — deliberately, never from CI | The workflow must never write its own authority |
+| repo | `secure-rhel8-ami_packer-build` policy · non-admin role (trust, boundary attachment, policy attachments) | `iam.yml` → `bootstrap-iam.sh --tier repo` via OIDC | Day-to-day IAM changes ride PRs and the workflow |
+| operator | `secure-rhel8-ami_boundary` · `secure-rhel8-ami_iam-manage` · `secure-rhel8-ami_iam-admin` · the `-admin` role | `bootstrap-iam.sh --tier operator --profile <sso>` — personally, never from CI | The workflow must never write its own authority |
 
-The anti-escalation chain: the management role can manage **only** the build role and build
-policy; it can attach **only** this repo's policy (`iam:PolicyARN` condition); it can create or
-re-bound the build role **only** carrying the permissions boundary (`iam:PermissionsBoundary`
-condition); it carries explicit Denies on itself, its own policy, and the boundary; and the
-boundary caps the build role's effective permissions to region-pinned EC2 actions even if the
-build policy document were rewritten wider. The account OIDC provider is account Layer-0,
-operator-owned, not managed here.
+The anti-escalation chain: the non-admin role's `iam-manage` grant can manage **only** the
+build policy and the role's own trust/boundary/attachments; it can attach **only** this repo's
+policies (`iam:PolicyARN` condition); create/re-bound requires the permissions boundary
+(`iam:PermissionsBoundary` condition); explicit Denies cover the `-admin` role, the boundary,
+and both governance policies; and the boundary caps the role's effective permissions —
+region-pinned EC2 plus IAM on exactly the two repo-tier objects — even if the build policy
+document were rewritten wider. The account OIDC provider is account Layer-0, operator-owned,
+not managed here.
+
+## Iterative policy derivation
+
+`secure-rhel8-ami_packer-build` is developed **empirically**: it started as a blank baseline
+(`sts:GetCallerIdentity` only) and every statement is added in response to an observed
+`UnauthorizedOperation` denial from a real build run — one denial, one commit, one
+`iam.yml apply`, re-run. The commit history of the policy file is the least-privilege
+derivation record; nothing in it is speculative.
 
 ## Substitution contract
 
@@ -49,13 +61,14 @@ resources. Substitute it everywhere in one operation.
 
 | Role | Trust source | Policies | Boundary | Purpose |
 |---|---|---|---|---|
-| `github_nwarila-platform_secure-rhel8-ami` | `roles/github_nwarila-platform_secure-rhel8-ami.trust.json` | `secure-rhel8-ami_packer-build` | `secure-rhel8-ami_boundary` | CI Packer build: launch, provision, snapshot, register, clean up |
-| `github_nwarila-platform_secure-rhel8-ami-iam` | `roles/github_nwarila-platform_secure-rhel8-ami-iam.trust.json` | `secure-rhel8-ami_iam-manage` | — (operator-tier object) | `iam.yml` workflow: reconcile the repo-tier objects with the tracked source |
+| `github_nwarila-platform_secure-rhel8-ami` | `roles/github_nwarila-platform_secure-rhel8-ami.trust.json` | `secure-rhel8-ami_packer-build` · `secure-rhel8-ami_iam-manage` | `secure-rhel8-ami_boundary` | GitHub-assumed: Packer builds (`packer.yaml`) and repo-tier IAM reconciliation (`iam.yml`) |
+| `github_nwarila-platform_secure-rhel8-ami-admin` | `roles/github_nwarila-platform_secure-rhel8-ami-admin.trust.json` | `secure-rhel8-ami_packer-build` · `secure-rhel8-ami_iam-admin` | — (operator trust level) | Personally assumed via the SSO broker: local builds, break-glass, and governance-tier applies |
 
-Each trust is bounded to this repository's immutable `repository_id`, both OIDC subject forms
-(plain and ID-embedded — see the windows-wsus reference for the CloudTrail-proven rationale),
-and exactly one `job_workflow_ref`: `packer.yaml` for the build role, `iam.yml` for the
-management role — so neither workflow can assume the other's role.
+The non-admin trust is bounded to this repository's immutable `repository_id`, both OIDC
+subject forms (plain and ID-embedded — see the windows-wsus reference for the
+CloudTrail-proven rationale), and exactly two `job_workflow_ref` entries: `packer.yaml` and
+`iam.yml`. The `-admin` trust admits only the organization SSO broker, bounded to the
+permission-set hash.
 
 ## Design notes
 
@@ -79,6 +92,11 @@ management role — so neither workflow can assume the other's role.
   volume/snapshot tagging timing is not create-time-guaranteed, and a `ResourceTag` condition
   here would fail a build closed twenty minutes in. Tighten with CloudTrail evidence from real
   runs (the windows-wsus "proven live" method) rather than by assumption.
+- **`iam.yml` and `packer.yaml` share the non-admin role** (two-role model, owner decision):
+  a compromised build workflow could reach the repo-tier IAM surface. The cap is the trust
+  (`job_workflow_ref` limits which workflows assume the role at all), the gated sources, the
+  iam-manage Denies, and the boundary ceiling. The role can update its own trust document —
+  accepted because the trust source rides the same gated PR path as every other IAM change.
 - **`ec2:CreateTags` is resource-type-scoped but not tag-value-gated**: Packer applies AMI and
   snapshot tags after creation rather than through create-time tag specifications on
   RegisterImage, so the grant covers the four resource types in-region.
