@@ -71,6 +71,21 @@
           "ec2:Vpc": "arn:aws:ec2:<region>:<account-id>:vpc/<vpc-id>"
         }
       }
+    },
+    {
+      "Sid": "RunInstancesInstanceLegImdsV2Enforced",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:InstanceType": "t3.medium",
+          "ec2:MetadataHttpTokens": "required"
+        },
+        "NumericEquals": {
+          "ec2:MetadataHttpPutResponseHopLimit": 1
+        }
+      }
     }
   ]
 }
