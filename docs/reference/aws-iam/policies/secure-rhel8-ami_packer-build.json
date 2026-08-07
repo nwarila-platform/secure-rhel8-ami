@@ -9,6 +9,12 @@
         "ec2:DescribeRegions"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "TemporaryKeyPairCreate",
+      "Effect": "Allow",
+      "Action": "ec2:CreateKeyPair",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:key-pair/packer_*"
     }
   ]
 }
