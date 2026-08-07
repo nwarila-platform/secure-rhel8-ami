@@ -1,0 +1,182 @@
+name: "Packer Build (AWS)"
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - packer/**
+      - .github/workflows/packer.yaml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packer-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  packer:
+    # Auto-build on push to main is gated behind the PACKER_BUILD_ENABLED repo
+    # variable so merging a packer change does not attempt an AMI build before
+    # the GitHub OIDC role (AWS_PACKER_ROLE_ARN) and the packer-build
+    # environment secrets are confirmed configured. Set
+    # vars.PACKER_BUILD_ENABLED=true (or run workflow_dispatch) for a live build.
+    if: >-
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'workflow_dispatch' || vars.PACKER_BUILD_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: packer-build
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      PACKER_VERSION: "1.15.0"
+      PACKER_ZIP_SHA256: "2fd1149c5c6c7604ced64d7b56638af05f6b7ed3f6835182bc913ddaba1f16b8"
+      PKR_VAR_aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      PKR_VAR_deploy_user_name: ${{ vars.DEPLOY_USER_NAME || 'ec2-user' }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Install Packer CLI
+        run: |
+          set -euo pipefail
+
+          packer_base_url="https://releases.hashicorp.com/packer/${PACKER_VERSION}"
+
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 2 --retry-connrefused --connect-timeout 15 \
+            "${packer_base_url}/packer_${PACKER_VERSION}_linux_amd64.zip" \
+            -o /tmp/packer.zip
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 2 --retry-connrefused --connect-timeout 15 \
+            "${packer_base_url}/packer_${PACKER_VERSION}_SHA256SUMS" \
+            -o /tmp/packer_SHA256SUMS
+
+          grep -E \
+            "^${PACKER_ZIP_SHA256}[[:space:]]+packer_${PACKER_VERSION}_linux_amd64\\.zip$" \
+            /tmp/packer_SHA256SUMS >/dev/null
+          printf '%s  %s\n' "${PACKER_ZIP_SHA256}" /tmp/packer.zip | sha256sum -c -
+
+          rm -rf /tmp/packer-bin
+          unzip -oq /tmp/packer.zip -d /tmp/packer-bin
+          sudo install -m 0755 /tmp/packer-bin/packer /usr/local/bin/packer
+          packer version
+
+      - name: Install Ansible
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade --disable-pip-version-check pip
+          python3 -m pip install --disable-pip-version-check --no-input \
+            ansible-core==2.20.4
+          ansible-playbook --version
+
+      - name: Checkout Packer Framework Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          path: aws-packer-framework
+          persist-credentials: false
+          # Initial framework scaffold — amazon-ebs contract with source_ami guard.
+          ref: bc4377b972c8e8587c750542d9496fd78c314f22
+          repository: nwarila-platform/aws-packer-framework
+
+      - name: Checkout Ansible Framework Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          path: ansible-framework
+          persist-credentials: false
+          ref: e8b2b95ead21c56da13ac1b41fe54569a69a2977
+          repository: nwarila-platform/ansible-framework
+
+      - name: Validate Runtime Dependencies
+        run: |
+          set -euo pipefail
+
+          required_variables=(
+            "PKR_VAR_aws_region"
+            "PKR_VAR_deploy_user_name"
+          )
+
+          for variable_name in "${required_variables[@]}"; do
+            variable_value="${!variable_name:-}"
+            if [[ -z "${variable_value//[[:space:]]/}" ]]; then
+              echo "Required environment variable is not set: ${variable_name}" >&2
+              exit 1
+            fi
+          done
+
+          required_commands=(
+            "ansible-playbook"
+            "aws"
+            "curl"
+            "git"
+            "packer"
+            "python3"
+            "sha256sum"
+            "unzip"
+          )
+
+          for command_name in "${required_commands[@]}"; do
+            if ! command -v "${command_name}" >/dev/null 2>&1; then
+              echo "Required executable not found: ${command_name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ secrets.AWS_PACKER_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          role-session-name: secure-rhel8-ami-build
+
+      - name: Verify AWS Identity
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity
+
+      - name: Sync Consumer Files Into Framework Checkout
+        run: |
+          set -euo pipefail
+
+          destination_dir="${GITHUB_WORKSPACE}/aws-packer-framework/packer"
+
+          cp -f "${GITHUB_WORKSPACE}/packer/systems.auto.pkrvars.hcl" "${destination_dir}/"
+          cp -f "${GITHUB_WORKSPACE}/packer/user-data.pkrtpl.hcl" "${destination_dir}/"
+          cp -f "${GITHUB_WORKSPACE}/packer/rhel-8.yml" "${destination_dir}/"
+
+      - name: Packer Init
+        working-directory: ${{ github.workspace }}/aws-packer-framework/packer
+        run: |
+          set -euo pipefail
+          packer init .
+
+      - name: Packer Validate and Build
+        working-directory: ${{ github.workspace }}/aws-packer-framework/packer
+        env:
+          ANSIBLE_CONFIG: ${{ github.workspace }}/ansible-framework/ansible.cfg
+        run: |
+          set -euo pipefail
+
+          packer validate .
+          packer build -timestamp-ui -color=false . | tee packer-build.log
+
+      - name: Upload Packer Build Diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packer-build-diagnostics
+          path: |
+            ${{ github.workspace }}/aws-packer-framework/packer/packer-build.log
+            ${{ github.workspace }}/aws-packer-framework/packer/manifests
+          if-no-files-found: warn
+          retention-days: 14
