@@ -99,6 +99,14 @@
           "ec2:CreateAction": "RunInstances"
         }
       }
+    },
+    {
+      "Sid": "RunInstancesUntaggableLegs",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": [
+        "arn:aws:ec2:<region>:<account-id>:key-pair/packer_*"
+      ]
     }
   ]
 }
