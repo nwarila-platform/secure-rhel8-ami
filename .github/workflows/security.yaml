@@ -27,7 +27,8 @@ jobs:
       contents: read
       security-events: write
       actions: read
-    uses: nwarila-platform/.github/.github/workflows/reusable-iac-security.yaml@928b8a3d3dce43f4c2bdd8369fbf5ea86f53b681 # nwarila-platform/.github main @ 2026-07-20
+    # nwarila-platform/.github main @ 2026-07-20
+    uses: nwarila-platform/.github/.github/workflows/reusable-iac-security.yaml@928b8a3d3dce43f4c2bdd8369fbf5ea86f53b681
 
   codeql:
     name: CodeQL
@@ -35,7 +36,8 @@ jobs:
       contents: read
       security-events: write
       actions: read
-    uses: nwarila-platform/.github/.github/workflows/reusable-codeql.yaml@928b8a3d3dce43f4c2bdd8369fbf5ea86f53b681 # nwarila-platform/.github main @ 2026-07-20
+    # nwarila-platform/.github main @ 2026-07-20
+    uses: nwarila-platform/.github/.github/workflows/reusable-codeql.yaml@928b8a3d3dce43f4c2bdd8369fbf5ea86f53b681
 
   scorecard:
     name: OpenSSF Scorecard
@@ -45,4 +47,5 @@ jobs:
       id-token: write
       actions: read
       contents: read
-    uses: nwarila-platform/.github/.github/workflows/reusable-scorecard.yaml@928b8a3d3dce43f4c2bdd8369fbf5ea86f53b681 # nwarila-platform/.github main @ 2026-07-20
+    # nwarila-platform/.github main @ 2026-07-20
+    uses: nwarila-platform/.github/.github/workflows/reusable-scorecard.yaml@928b8a3d3dce43f4c2bdd8369fbf5ea86f53b681

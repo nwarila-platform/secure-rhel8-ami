@@ -1,0 +1,144 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DiscoveryDescribes",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeAccountAttributes",
+        "ec2:DescribeImages",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeInstanceTypeOfferings",
+        "ec2:DescribeInstances",
+        "ec2:DescribeKeyPairs",
+        "ec2:DescribeRegions",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSnapshots",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeTags",
+        "ec2:DescribeVolumes",
+        "ec2:DescribeVpcs"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "TemporaryKeyPairLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateKeyPair",
+        "ec2:DeleteKeyPair"
+      ],
+      "Resource": "arn:aws:ec2:<region>:<account-id>:key-pair/packer_*"
+    },
+    {
+      "Sid": "TemporarySecurityGroupLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:DeleteSecurityGroup"
+      ],
+      "Resource": [
+        "arn:aws:ec2:<region>:<account-id>:security-group/*",
+        "arn:aws:ec2:<region>:<account-id>:vpc/<vpc-id>"
+      ]
+    },
+    {
+      "Sid": "RunInstancesUntaggableLegs",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": [
+        "arn:aws:ec2:<region>::image/ami-*",
+        "arn:aws:ec2:<region>:<account-id>:key-pair/packer_*",
+        "arn:aws:ec2:<region>:<account-id>:network-interface/*",
+        "arn:aws:ec2:<region>:<account-id>:security-group/*",
+        "arn:aws:ec2:<region>:<account-id>:subnet/*"
+      ]
+    },
+    {
+      "Sid": "RunInstancesTaggedInstanceLeg",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/nwarila:management:repository-id": "<repository-id>",
+          "ec2:InstanceType": [
+            "t3.medium",
+            "t3.large"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "RunInstancesEncryptedVolumeLeg",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:volume/*",
+      "Condition": {
+        "Bool": {
+          "ec2:Encrypted": "true"
+        },
+        "NumericLessThanEquals": {
+          "ec2:VolumeSize": 64
+        }
+      }
+    },
+    {
+      "Sid": "LifecycleOnlyOnOurTaggedInstances",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StopInstances",
+        "ec2:TerminateInstances"
+      ],
+      "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+        }
+      }
+    },
+    {
+      "Sid": "VolumeCleanup",
+      "Effect": "Allow",
+      "Action": "ec2:DeleteVolume",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:volume/*"
+    },
+    {
+      "Sid": "SnapshotLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateSnapshot",
+        "ec2:DeleteSnapshot"
+      ],
+      "Resource": [
+        "arn:aws:ec2:<region>:<account-id>:volume/*",
+        "arn:aws:ec2:<region>::snapshot/*"
+      ]
+    },
+    {
+      "Sid": "ImageRegistration",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RegisterImage",
+        "ec2:DeregisterImage"
+      ],
+      "Resource": [
+        "arn:aws:ec2:<region>::image/*",
+        "arn:aws:ec2:<region>::snapshot/*"
+      ]
+    },
+    {
+      "Sid": "TagOnCreateAndPostCreate",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": [
+        "arn:aws:ec2:<region>:<account-id>:instance/*",
+        "arn:aws:ec2:<region>:<account-id>:volume/*",
+        "arn:aws:ec2:<region>::image/*",
+        "arn:aws:ec2:<region>::snapshot/*"
+      ]
+    }
+  ]
+}

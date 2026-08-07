@@ -4,7 +4,10 @@
 [![Security](https://github.com/nwarila-platform/secure-rhel8-ami/actions/workflows/security.yaml/badge.svg)](https://github.com/nwarila-platform/secure-rhel8-ami/actions/workflows/security.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Consumer repository for [aws-packer-framework](https://github.com/nwarila-platform/aws-packer-framework): builds and publishes hardened RHEL 8 AMIs for this account on the DISA STIG / CIS compliance track. This repo is data-plus-caller by design — it owns the RHEL 8 Packer inventory, the first-boot user-data template, the hardening playbook, and the caller workflows; the framework owns all executable build logic.
+Consumer repository for [aws-packer-framework](https://github.com/nwarila-platform/aws-packer-framework): builds and
+publishes hardened RHEL 8 AMIs for this account on the DISA STIG / CIS compliance track. This repo is data-plus-caller
+by design — it owns the RHEL 8 Packer inventory, the first-boot user-data template, the hardening playbook, and the
+caller workflows; the framework owns all executable build logic.
 
 ## Ownership Model
 
@@ -19,12 +22,19 @@ Consumer repository for [aws-packer-framework](https://github.com/nwarila-platfo
 ## How a Build Works
 
 1. CI checks out `aws-packer-framework` and `ansible-framework` at SHA-pinned refs.
-2. Consumer files (`systems.auto.pkrvars.hcl`, `user-data.pkrtpl.hcl`, `rhel-8.yml`) are synced into the framework's `packer/` working directory; the `.auto.pkrvars.hcl` suffix makes Packer load the inventory automatically.
-3. The framework resolves the owner-scoped official Red Hat RHEL 8.10 source AMI (owner `309956199498`), launches the build instance with IMDSv2 enforced and encrypted EBS volumes, and connects as `ec2-user` with a Packer-generated temporary keypair.
-4. The Ansible provisioner runs [packer/rhel-8.yml](packer/rhel-8.yml), which dispatches through ansible-framework's `os_bootstrap` role (RedHat-family hosts route to `RedHat_Rocky_8`, whose strict assertion accepts RHEL/Rocky 8). STIG and CIS hardening roles are layered on from ansible-framework as they land.
-5. The framework registers a timestamped, tagged, encrypted AMI (`secure-rhel8-<timestamp>`) and writes the build manifest.
+2. Consumer files (`systems.auto.pkrvars.hcl`, `user-data.pkrtpl.hcl`, `rhel-8.yml`) are synced into the framework's
+   `packer/` working directory; the `.auto.pkrvars.hcl` suffix makes Packer load the inventory automatically.
+3. The framework resolves the owner-scoped official Red Hat RHEL 8.10 source AMI (owner `309956199498`), launches the
+   build instance with IMDSv2 enforced and encrypted EBS volumes, and connects as `ec2-user` with a Packer-generated
+   temporary keypair.
+4. The Ansible provisioner runs [packer/rhel-8.yml](packer/rhel-8.yml), which dispatches through ansible-framework's
+   `os_bootstrap` role (RedHat-family hosts route to `RedHat_Rocky_8`, whose strict assertion accepts RHEL/Rocky 8).
+   STIG and CIS hardening roles are layered on from ansible-framework as they land.
+5. The framework registers a timestamped, tagged, encrypted AMI (`secure-rhel8-<timestamp>`) and writes the build
+   manifest.
 
-See [docs/explanation/stig-cis-hardening-strategy.md](docs/explanation/stig-cis-hardening-strategy.md) for the compliance approach and its known limits.
+See [docs/explanation/stig-cis-hardening-strategy.md](docs/explanation/stig-cis-hardening-strategy.md) for the
+compliance approach and its known limits.
 
 ## CI/CD Pipeline
 
@@ -47,7 +57,8 @@ Before the first live build:
 | Repo variable | `PACKER_BUILD_ENABLED` | Set `true` to allow push-triggered builds; `workflow_dispatch` works regardless |
 | Repo variable | `DEPLOY_USER_NAME` | Optional; defaults to `ec2-user` |
 
-The build authenticates exclusively through GitHub OIDC role assumption — no static access keys exist in this repository or its secrets.
+The build authenticates exclusively through GitHub OIDC role assumption — no static access keys exist in this repository
+or its secrets.
 
 ## Local Development
 
@@ -57,7 +68,8 @@ pre-commit install --hook-type commit-msg
 pre-commit run --all-files
 ```
 
-For a manual end-to-end build from a workstation, see [docs/runbooks/manual-packer-build.md](docs/runbooks/manual-packer-build.md).
+For a manual end-to-end build from a workstation, see
+[docs/runbooks/manual-packer-build.md](docs/runbooks/manual-packer-build.md).
 
 ## Consuming the AMIs
 
