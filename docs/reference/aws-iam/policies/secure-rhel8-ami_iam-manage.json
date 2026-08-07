@@ -1,0 +1,88 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManageBuildPolicyDocument",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreatePolicy",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions",
+        "iam:TagPolicy"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:policy/secure-rhel8-ami_packer-build"
+    },
+    {
+      "Sid": "ReadBuildRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:role/github_nwarila-platform_secure-rhel8-ami"
+    },
+    {
+      "Sid": "ManageBuildRoleTrust",
+      "Effect": "Allow",
+      "Action": [
+        "iam:TagRole",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:role/github_nwarila-platform_secure-rhel8-ami"
+    },
+    {
+      "Sid": "CreateBuildRoleOnlyWithBoundary",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:PutRolePermissionsBoundary"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:role/github_nwarila-platform_secure-rhel8-ami",
+      "Condition": {
+        "StringEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::<account-id>:policy/secure-rhel8-ami_boundary"
+        }
+      }
+    },
+    {
+      "Sid": "AttachOnlyTheRepoBuildPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:role/github_nwarila-platform_secure-rhel8-ami",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": "arn:aws:iam::<account-id>:policy/secure-rhel8-ami_packer-build"
+        }
+      }
+    },
+    {
+      "Sid": "ValidateDocumentsBeforeApply",
+      "Effect": "Allow",
+      "Action": "access-analyzer:ValidatePolicy",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ResolveSubstitutionValues",
+      "Effect": "Allow",
+      "Action": "ec2:DescribeVpcs",
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenySelfAndBoundaryMutation",
+      "Effect": "Deny",
+      "Action": "iam:*",
+      "Resource": [
+        "arn:aws:iam::<account-id>:role/github_nwarila-platform_secure-rhel8-ami-iam",
+        "arn:aws:iam::<account-id>:policy/secure-rhel8-ami_iam-manage",
+        "arn:aws:iam::<account-id>:policy/secure-rhel8-ami_boundary"
+      ]
+    }
+  ]
+}
