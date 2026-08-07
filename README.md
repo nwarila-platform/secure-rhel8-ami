@@ -52,13 +52,16 @@ Before the first live build:
 
 | Kind | Name | Purpose |
 |------|------|---------|
-| Environment secret (`packer-build`) | `AWS_PACKER_ROLE_ARN` | IAM role ARN trusted for GitHub OIDC with the Packer EC2/EBS/AMI permission baseline |
+| Environment secret (`packer-build`) | `AWS_PACKER_ROLE_ARN` | Build role ARN (role itself is workflow-managed by `iam.yml`) |
+| Environment secret (`iam-apply`) | `AWS_IAM_ROLE_ARN` | IAM management role ARN (operator-tier object) assumed by `iam.yml` |
 | Repo variable | `AWS_REGION` | Build region (defaults to `us-east-1`) |
 | Repo variable | `PACKER_BUILD_ENABLED` | Set `true` to allow push-triggered builds; `workflow_dispatch` works regardless |
 | Repo variable | `DEPLOY_USER_NAME` | Optional; defaults to `ec2-user` |
 
 The build authenticates exclusively through GitHub OIDC role assumption — no static access keys exist in this repository
-or its secrets.
+or its secrets. Repo-tier IAM (the build role and policy) is reconciled by the `AWS IAM` workflow with weekly drift
+detection; only the governance layer (permissions boundary, management role) is operator-applied, once. See
+[docs/reference/aws-iam/](docs/reference/aws-iam/) for the two-tier model and the anti-escalation chain.
 
 ## Local Development
 

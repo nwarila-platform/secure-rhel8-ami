@@ -1,0 +1,110 @@
+# =========================================================================================== #
+# AWS IAM — source gate and workflow-managed apply
+# ------------------------------------------------------------------------------------------- #
+# Two jobs with a deliberate privilege split:
+#
+#   gate    Offline by design: no AWS credentials, no network beyond checkout. Runs the
+#           substitution gate on every change to the IAM sources or the scripts, because the
+#           gate is only a control if it runs.
+#
+#   manage  The workflow-managed apply. Assumes github_nwarila-platform_secure-rhel8-ami-iam
+#           via OIDC — a role whose trust is pinned to THIS workflow file and whose policy can
+#           manage only this repository's build role and build policy, cannot touch itself,
+#           its own policy, or the permissions boundary, and can only attach this repo's
+#           policy. The governance layer (boundary, iam-manage, the -iam role) is
+#           operator-tier: scripts/bootstrap-iam.sh --tier operator, run deliberately with SSO
+#           credentials, never from CI.
+# =========================================================================================== #
+name: 'AWS IAM'
+
+on:
+  pull_request:
+    paths:
+      - 'docs/reference/aws-iam/**'
+      - 'scripts/check-iam-literals.sh'
+      - 'scripts/bootstrap-iam.sh'
+      - '.github/workflows/iam.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/reference/aws-iam/**'
+      - 'scripts/check-iam-literals.sh'
+      - 'scripts/bootstrap-iam.sh'
+  schedule:
+    # Weekly drift detection: live IAM vs tracked source, the comparison no offline gate makes.
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: IAM action to run against live AWS.
+        required: true
+        type: choice
+        default: plan
+        options:
+          - plan
+          - apply
+          - check-drift
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iam-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: 'Substitution gate'
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: 'Shell syntax'
+        run: bash -n scripts/check-iam-literals.sh scripts/bootstrap-iam.sh
+
+      - name: 'IAM substitution gate'
+        run: ./scripts/check-iam-literals.sh
+
+  manage:
+    name: "IAM ${{ inputs.mode || 'check-drift' }}"
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: iam-apply
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: 'Substitution gate before touching AWS'
+        run: ./scripts/check-iam-literals.sh
+
+      - name: 'Configure AWS credentials'
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          role-session-name: secure-rhel8-ami-iam
+
+      - name: 'Run bootstrap-iam (repo tier)'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.mode || 'check-drift' }}
+        run: |
+          set -euo pipefail
+          case "${MODE}" in
+            plan)        ./scripts/bootstrap-iam.sh --plan ;;
+            apply)       ./scripts/bootstrap-iam.sh --apply ;;
+            check-drift) ./scripts/bootstrap-iam.sh --check-drift ;;
+            *) echo "unknown mode ${MODE}" >&2; exit 2 ;;
+          esac

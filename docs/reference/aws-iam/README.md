@@ -1,10 +1,29 @@
 # AWS IAM — roles and policies (secure-rhel8-ami)
 
-**Type**: Reference (Diátaxis). The IAM used by this repository's AMI builds. An operator
-provisions the role and policy; Terraform does not manage them. Cloned from the
+**Type**: Reference (Diátaxis). The IAM used by this repository's AMI builds. Cloned from the
 [`windows-wsus` IAM reference](https://github.com/nwarila-platform/windows-wsus/blob/main/docs/reference/aws-iam/README.md)
-and narrowed to the Packer build lifecycle — read that document's substitution contract
-before applying anything here; its rules apply unchanged.
+(gates matured in `pdq-deploy-inventory`) and narrowed to the Packer build lifecycle — read
+that document's substitution contract before applying anything here; its rules apply unchanged.
+
+Unlike the siblings, the build boundary here is **workflow-managed**: `.github/workflows/iam.yml`
+assumes a dedicated management role via OIDC and runs `scripts/bootstrap-iam.sh` (materialize →
+substitution gate → Access Analyzer → plan/apply/check-drift, weekly scheduled drift detection).
+Only the governance layer stays operator-applied.
+
+## Two tiers
+
+| Tier | Objects | Applied by | Why |
+|---|---|---|---|
+| repo | `secure-rhel8-ami_packer-build` policy · `github_nwarila-platform_secure-rhel8-ami` role (trust, boundary attachment, policy attachment) | `iam.yml` → `bootstrap-iam.sh --tier repo` via OIDC | Day-to-day IAM changes ride PRs and the workflow |
+| operator | `secure-rhel8-ami_boundary` · `secure-rhel8-ami_iam-manage` · `github_nwarila-platform_secure-rhel8-ami-iam` role | `bootstrap-iam.sh --tier operator --profile <sso>` — deliberately, never from CI | The workflow must never write its own authority |
+
+The anti-escalation chain: the management role can manage **only** the build role and build
+policy; it can attach **only** this repo's policy (`iam:PolicyARN` condition); it can create or
+re-bound the build role **only** carrying the permissions boundary (`iam:PermissionsBoundary`
+condition); it carries explicit Denies on itself, its own policy, and the boundary; and the
+boundary caps the build role's effective permissions to region-pinned EC2 actions even if the
+build policy document were rewritten wider. The account OIDC provider is account Layer-0,
+operator-owned, not managed here.
 
 ## Substitution contract
 
@@ -28,13 +47,15 @@ resources. Substitute it everywhere in one operation.
 
 ## Role-to-policy map
 
-| Role | Trust source | Policies | Purpose |
-|---|---|---|---|
-| `github_nwarila-platform_secure-rhel8-ami` | `roles/github_nwarila-platform_secure-rhel8-ami.trust.json` | `secure-rhel8-ami_packer-build` | CI Packer build: launch, provision, snapshot, register, clean up |
+| Role | Trust source | Policies | Boundary | Purpose |
+|---|---|---|---|---|
+| `github_nwarila-platform_secure-rhel8-ami` | `roles/github_nwarila-platform_secure-rhel8-ami.trust.json` | `secure-rhel8-ami_packer-build` | `secure-rhel8-ami_boundary` | CI Packer build: launch, provision, snapshot, register, clean up |
+| `github_nwarila-platform_secure-rhel8-ami-iam` | `roles/github_nwarila-platform_secure-rhel8-ami-iam.trust.json` | `secure-rhel8-ami_iam-manage` | — (operator-tier object) | `iam.yml` workflow: reconcile the repo-tier objects with the tracked source |
 
-The trust is bounded to this repository's immutable `repository_id`, both OIDC subject forms
+Each trust is bounded to this repository's immutable `repository_id`, both OIDC subject forms
 (plain and ID-embedded — see the windows-wsus reference for the CloudTrail-proven rationale),
-and exactly one `job_workflow_ref`: `packer.yaml`, the build boundary workflow.
+and exactly one `job_workflow_ref`: `packer.yaml` for the build role, `iam.yml` for the
+management role — so neither workflow can assume the other's role.
 
 ## Design notes
 
