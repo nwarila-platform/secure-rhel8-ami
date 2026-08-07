@@ -49,6 +49,13 @@
 !docs/README.md
 !docs/explanation/
 !docs/explanation/stig-cis-hardening-strategy.md
+!docs/reference/
+!docs/reference/aws-iam/
+!docs/reference/aws-iam/README.md
+!docs/reference/aws-iam/roles/
+!docs/reference/aws-iam/roles/github_nwarila-platform_secure-rhel8-ami.trust.json
+!docs/reference/aws-iam/policies/
+!docs/reference/aws-iam/policies/secure-rhel8-ami_packer-build.json
 !docs/runbooks/
 !docs/runbooks/manual-packer-build.md
 

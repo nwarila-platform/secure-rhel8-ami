@@ -1,15 +1,25 @@
 ---
 # ============================================================================================= #
-# RHEL 8 Hardening Playbook                                                                    #
+# RHEL 8 Build Playbook                                                                        #
 #                                                                                               #
-# Consumer playbook for the AWS Packer Framework Ansible provisioner. Runs the                  #
-# ansible-framework os_bootstrap dispatcher (RedHat-family hosts route to RedHat_Rocky_8,       #
-# whose strict assertion accepts RHEL/Rocky 8). STIG and CIS hardening roles are layered on     #
-# from ansible-framework as they become available.                                              #
+# Consumer playbook for the AWS Packer Framework Ansible provisioner, in two plays:             #
 #                                                                                               #
-# gather_facts: false is required by the dispatcher: play-level implicit gathering runs         #
-# before role tasks and would break fresh Windows hosts; keep connection and privilege          #
-# variables in inventory, not vars, so the selected bootstrap role applies its own              #
+#   1. Bootstrap — runs the ansible-framework os_bootstrap dispatcher against the booted        #
+#      build instance (RedHat-family hosts route to RedHat_Rocky_8, whose strict assertion      #
+#      accepts RHEL/Rocky 8). Hardening roles are layered here as they land; everything this    #
+#      play changes is copied into the image by play 2.                                         #
+#                                                                                               #
+#   2. Surrogate image assembly — partitions the blank surrogate volume into the org's STIG     #
+#      layout (mirroring proxmox-packer-framework's Kickstart layout: /boot + LVM sysvg with    #
+#      separate /home /opt /tmp /var /var/tmp /var/log /var/log/audit), copies the configured   #
+#      root filesystem in with credential/state excludes, installs the bootloader, and leaves   #
+#      the volume ready for the framework's amazon-ebssurrogate source to register as the AMI.  #
+#      The excludes are the zero-persistent-credential guarantee: no authorized_keys, no SSH    #
+#      host keys, no machine-id, no cloud-init state, and no build logs survive into the AMI.   #
+#                                                                                               #
+# gather_facts: false is required by the os_bootstrap dispatcher: play-level implicit           #
+# gathering runs before role tasks and would break fresh Windows hosts; keep connection and     #
+# privilege variables in inventory, not vars, so the selected bootstrap role applies its own    #
 # task-scoped transport and privilege settings.                                                 #
 # ============================================================================================= #
 
@@ -21,3 +31,167 @@
     - name: Bootstrap this host
       ansible.builtin.include_role:
         name: 'os_bootstrap'
+
+- name: STIG Partition Surrogate Volume and Assemble Image
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    sysimage: /mnt/sysimage
+  tasks:
+    - name: Install imaging tooling (also lands in the image, which needs lvm2 to boot)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        dnf install -y lvm2 parted e2fsprogs rsync
+      changed_when: true
+
+    - name: Resolve the blank surrogate disk (the only unmounted, unpartitioned disk)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        root_disk="/dev/$(lsblk -no PKNAME "$(findmnt -no SOURCE /)")"
+        surrogate=""
+        for disk in $(lsblk -dnpo NAME,TYPE | awk '$2=="disk"{print $1}'); do
+          [ "${disk}" = "${root_disk}" ] && continue
+          if [ "$(lsblk -no MOUNTPOINTS "${disk}" | sed '/^$/d' | wc -l)" -eq 0 ]; then
+            surrogate="${disk}"
+            break
+          fi
+        done
+        [ -n "${surrogate}" ] || { echo "no surrogate disk found" >&2; exit 1; }
+        echo "${surrogate}"
+      register: surrogate_disk
+      changed_when: false
+
+    - name: Record surrogate device path
+      ansible.builtin.set_fact:
+        surrogate_dev: "{{ surrogate_disk.stdout_lines[-1] }}"
+
+    - name: Partition surrogate disk (GPT — BIOS boot, /boot, LVM PV)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        parted -s "{{ surrogate_dev }}" mklabel gpt
+        parted -s "{{ surrogate_dev }}" mkpart biosboot 1MiB 2MiB
+        parted -s "{{ surrogate_dev }}" set 1 bios_grub on
+        parted -s "{{ surrogate_dev }}" mkpart boot 2MiB 1026MiB
+        parted -s "{{ surrogate_dev }}" mkpart pv 1026MiB 100%
+        udevadm settle
+      changed_when: true
+
+    - name: Create STIG LVM layout and filesystems (labels mirror the Kickstart layout)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        case "{{ surrogate_dev }}" in
+          *nvme*) p="{{ surrogate_dev }}p" ;;
+          *)      p="{{ surrogate_dev }}"  ;;
+        esac
+        pvcreate -ff -y "${p}3"
+        vgcreate sysvg "${p}3"
+        lvcreate -y -L 1G    -n lv_swap      sysvg
+        lvcreate -y -L 10G   -n lv_root     sysvg
+        lvcreate -y -L 4G    -n lv_home     sysvg
+        lvcreate -y -L 2G    -n lv_opt      sysvg
+        lvcreate -y -L 4G    -n lv_tmp      sysvg
+        lvcreate -y -L 2G    -n lv_var      sysvg
+        lvcreate -y -L 1G    -n lv_var_tmp  sysvg
+        lvcreate -y -L 4G    -n lv_var_log  sysvg
+        lvcreate -y -L 500M  -n lv_var_audit sysvg
+        mkfs.ext4 -q -F -L BOOTFS    "${p}2"
+        mkfs.ext4 -q -F -L ROOTFS    /dev/sysvg/lv_root
+        mkfs.ext4 -q -F -L HOMEFS    /dev/sysvg/lv_home
+        mkfs.ext4 -q -F -L OPTFS     /dev/sysvg/lv_opt
+        mkfs.ext4 -q -F -L TMPFS     /dev/sysvg/lv_tmp
+        mkfs.ext4 -q -F -L VARFS     /dev/sysvg/lv_var
+        mkfs.ext4 -q -F -L VARTMPFS  /dev/sysvg/lv_var_tmp
+        mkfs.ext4 -q -F -L VARLOGFS  /dev/sysvg/lv_var_log
+        mkfs.ext4 -q -F -L AUDITFS   /dev/sysvg/lv_var_audit
+        mkswap -L SWAPFS /dev/sysvg/lv_swap
+      changed_when: true
+
+    - name: Mount the target filesystem tree
+      ansible.builtin.shell: |
+        set -euo pipefail
+        case "{{ surrogate_dev }}" in
+          *nvme*) p="{{ surrogate_dev }}p" ;;
+          *)      p="{{ surrogate_dev }}"  ;;
+        esac
+        mkdir -p {{ sysimage }}
+        mount /dev/sysvg/lv_root {{ sysimage }}
+        mkdir -p {{ sysimage }}/boot {{ sysimage }}/home {{ sysimage }}/opt \
+                 {{ sysimage }}/tmp {{ sysimage }}/var
+        mount "${p}2"                {{ sysimage }}/boot
+        mount /dev/sysvg/lv_home    {{ sysimage }}/home
+        mount /dev/sysvg/lv_opt     {{ sysimage }}/opt
+        mount /dev/sysvg/lv_tmp     {{ sysimage }}/tmp
+        mount /dev/sysvg/lv_var     {{ sysimage }}/var
+        mkdir -p {{ sysimage }}/var/tmp {{ sysimage }}/var/log
+        mount /dev/sysvg/lv_var_tmp {{ sysimage }}/var/tmp
+        mount /dev/sysvg/lv_var_log {{ sysimage }}/var/log
+        mkdir -p {{ sysimage }}/var/log/audit
+        mount /dev/sysvg/lv_var_audit {{ sysimage }}/var/log/audit
+      changed_when: true
+
+    - name: Copy the configured root into the STIG layout (credential/state excludes)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        rsync -aAXH --numeric-ids \
+          --exclude=/dev/'*' --exclude=/proc/'*' --exclude=/sys/'*' --exclude=/run/'*' \
+          --exclude=/mnt/'*' --exclude=/media/'*' --exclude=/tmp/'*' --exclude=/var/tmp/'*' \
+          --exclude=/lost+found \
+          --exclude=/home/'*'/.ssh --exclude=/root/.ssh \
+          --exclude=/etc/ssh/ssh_host_'*' \
+          --exclude=/var/lib/cloud/'*' \
+          --exclude=/var/lib/systemd/random-seed \
+          --exclude=/var/log/'*' \
+          / {{ sysimage }}/
+        chmod 1777 {{ sysimage }}/tmp {{ sysimage }}/var/tmp
+        chmod 0700 {{ sysimage }}/var/log/audit
+      changed_when: true
+
+    - name: Write the target fstab with STIG mount options
+      ansible.builtin.copy:
+        dest: "{{ sysimage }}/etc/fstab"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          LABEL=ROOTFS    /               ext4  defaults                     1 1
+          LABEL=BOOTFS    /boot           ext4  defaults,nodev,nosuid        1 2
+          LABEL=HOMEFS    /home           ext4  defaults,nodev,nosuid        1 2
+          LABEL=OPTFS     /opt            ext4  defaults,nodev               1 2
+          LABEL=TMPFS     /tmp            ext4  defaults,nodev,noexec,nosuid 1 2
+          LABEL=VARFS     /var            ext4  defaults,nodev               1 2
+          LABEL=VARTMPFS  /var/tmp        ext4  defaults,nodev,noexec,nosuid 1 2
+          LABEL=VARLOGFS  /var/log        ext4  defaults,nodev,noexec,nosuid 1 2
+          LABEL=AUDITFS   /var/log/audit  ext4  defaults,nodev,noexec,nosuid 1 2
+          LABEL=SWAPFS    none            swap  defaults                     0 0
+
+    - name: Install bootloader and regenerate initramfs for the LVM root
+      ansible.builtin.shell: |
+        set -euo pipefail
+        mount --rbind /dev  {{ sysimage }}/dev  && mount --make-rslave {{ sysimage }}/dev
+        mount --rbind /sys  {{ sysimage }}/sys  && mount --make-rslave {{ sysimage }}/sys
+        mount -t proc proc  {{ sysimage }}/proc
+
+        existing_args="$(sed -n 's/^GRUB_CMDLINE_LINUX="\(.*\)"$/\1/p' {{ sysimage }}/etc/default/grub)"
+        kernel_args="root=/dev/mapper/sysvg-lv_root ro rd.lvm.lv=sysvg/lv_root ${existing_args}"
+        sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"rd.lvm.lv=sysvg/lv_root ${existing_args}\"|" \
+          {{ sysimage }}/etc/default/grub
+
+        chroot {{ sysimage }} grub2-install --target=i386-pc "{{ surrogate_dev }}"
+        kver="$(chroot {{ sysimage }} sh -c 'ls /lib/modules' | sort -V | tail -1)"
+        chroot {{ sysimage }} dracut -f --add lvm "/boot/initramfs-${kver}.img" "${kver}"
+        chroot {{ sysimage }} grub2-mkconfig -o /boot/grub2/grub.cfg
+        chroot {{ sysimage }} grub2-editenv /boot/grub2/grubenv set kernelopts="${kernel_args}"
+
+        # SELinux stays enforcing; relabel the copied tree on first boot.
+        touch {{ sysimage }}/.autorelabel
+      changed_when: true
+
+    - name: Scrub identity state and detach the assembled volume
+      ansible.builtin.shell: |
+        set -euo pipefail
+        truncate -s 0 {{ sysimage }}/etc/machine-id
+        umount -R {{ sysimage }}
+        vgchange -an sysvg
+        sync
+      changed_when: true

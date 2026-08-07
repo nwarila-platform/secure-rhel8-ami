@@ -9,7 +9,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for suggesting an improvement. Please describe the problem you're trying to solve and your proposed solution.
+        Thanks for suggesting an improvement. Please describe the problem you're trying
+        to solve and your proposed solution.
 
   - type: textarea
     id: problem
