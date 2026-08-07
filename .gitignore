@@ -1,0 +1,59 @@
+# Ignore everything by default
+**
+
+# --- Root ---
+!.gitignore
+!.gitattributes
+!.editorconfig
+!.pre-commit-config.yaml
+!.release-please-manifest.json
+!release-please-config.json
+!CHANGELOG.md
+!CODE_OF_CONDUCT.md
+!CONTRIBUTING.md
+!LICENSE
+!README.md
+!SECURITY.md
+!SUPPORT.md
+
+# --- .config ---
+!.config/
+!.config/.markdownlint.json
+!.config/.yamllint.yaml
+
+# --- .github ---
+!.github/
+!.github/CODEOWNERS
+!.github/FUNDING.yml
+!.github/renovate.json5
+!.github/pull_request_template.md
+!.github/ISSUE_TEMPLATE/
+!.github/ISSUE_TEMPLATE/bug_report.yml
+!.github/ISSUE_TEMPLATE/feature_request.yml
+!.github/ISSUE_TEMPLATE/config.yml
+!.github/workflows/
+!.github/workflows/pr-verify.yaml
+!.github/workflows/packer.yaml
+!.github/workflows/release-please.yaml
+!.github/workflows/security.yaml
+!.github/workflows/repo-hygiene.yaml
+
+# --- .vscode ---
+!.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
+# --- docs ---
+!docs/
+!docs/README.md
+!docs/explanation/
+!docs/explanation/stig-cis-hardening-strategy.md
+!docs/runbooks/
+!docs/runbooks/manual-packer-build.md
+
+# --- packer ---
+!packer/
+!packer/systems.auto.pkrvars.hcl
+!packer/user-data.pkrtpl.hcl
+!packer/rhel-8.yml

@@ -1,0 +1,23 @@
+---
+# ============================================================================================= #
+# RHEL 8 Hardening Playbook                                                                    #
+#                                                                                               #
+# Consumer playbook for the AWS Packer Framework Ansible provisioner. Runs the                  #
+# ansible-framework os_bootstrap dispatcher (RedHat-family hosts route to RedHat_Rocky_8,       #
+# whose strict assertion accepts RHEL/Rocky 8). STIG and CIS hardening roles are layered on     #
+# from ansible-framework as they become available.                                              #
+#                                                                                               #
+# gather_facts: false is required by the dispatcher: play-level implicit gathering runs         #
+# before role tasks and would break fresh Windows hosts; keep connection and privilege          #
+# variables in inventory, not vars, so the selected bootstrap role applies its own              #
+# task-scoped transport and privilege settings.                                                 #
+# ============================================================================================= #
+
+- name: RHEL 8 Bootstrap and Hardening
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Bootstrap this host
+      ansible.builtin.include_role:
+        name: 'os_bootstrap'

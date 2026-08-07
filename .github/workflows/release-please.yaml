@@ -1,0 +1,28 @@
+name: Release Please
+
+# Optional release entrypoint. Push-triggered release-please is opt-in through
+# the RELEASE_PLEASE_ON_PUSH repository variable because GitHub requires an
+# explicit repository setting before Actions can create release PRs.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.RELEASE_PLEASE_ON_PUSH == 'true' }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    uses: NWarila/.github/.github/workflows/reusable-release-please.yaml@e7456b0219e8750fbef8bd70a0f1ccf7d47f1c20

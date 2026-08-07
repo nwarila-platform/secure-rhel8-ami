@@ -1,0 +1,131 @@
+name: "PR Verify"
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-verify-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Branch Promotion Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      ACTIONLINT_VERSION: "1.7.8"
+      ACTIONLINT_TAR_SHA256: "be92c2652ab7b6d08425428797ceabeb16e31a781c07bc388456b4e592f3e36a"
+      PACKER_VERSION: "1.15.0"
+      PACKER_ZIP_SHA256: "2fd1149c5c6c7604ced64d7b56638af05f6b7ed3f6835182bc913ddaba1f16b8"
+      PKR_VAR_aws_region: us-east-1
+      PKR_VAR_deploy_user_name: ec2-user
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Install Validation Tooling
+        run: |
+          set -euo pipefail
+
+          actionlint_base_url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          packer_base_url="https://releases.hashicorp.com/packer/${PACKER_VERSION}"
+
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 2 --retry-connrefused --connect-timeout 15 \
+            "${actionlint_base_url}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            -o /tmp/actionlint.tar.gz
+          printf '%s  %s\n' "${ACTIONLINT_TAR_SHA256}" /tmp/actionlint.tar.gz | sha256sum -c -
+
+          rm -rf /tmp/actionlint-bin
+          mkdir -p /tmp/actionlint-bin
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp/actionlint-bin
+          sudo install -m 0755 /tmp/actionlint-bin/actionlint /usr/local/bin/actionlint
+
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 2 --retry-connrefused --connect-timeout 15 \
+            "${packer_base_url}/packer_${PACKER_VERSION}_linux_amd64.zip" \
+            -o /tmp/packer.zip
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 2 --retry-connrefused --connect-timeout 15 \
+            "${packer_base_url}/packer_${PACKER_VERSION}_SHA256SUMS" \
+            -o /tmp/packer_SHA256SUMS
+
+          grep -E \
+            "^${PACKER_ZIP_SHA256}[[:space:]]+packer_${PACKER_VERSION}_linux_amd64\\.zip$" \
+            /tmp/packer_SHA256SUMS >/dev/null
+          printf '%s  %s\n' "${PACKER_ZIP_SHA256}" /tmp/packer.zip | sha256sum -c -
+
+          rm -rf /tmp/packer-bin
+          unzip -oq /tmp/packer.zip -d /tmp/packer-bin
+          sudo install -m 0755 /tmp/packer-bin/packer /usr/local/bin/packer
+
+          python3 -m pip install --upgrade --disable-pip-version-check pip
+          python3 -m pip install --disable-pip-version-check --no-input \
+            ansible-core==2.20.4 \
+            pre-commit==4.5.1 \
+            PyYAML==6.0.3
+
+          packer version
+          actionlint -version
+          ansible-playbook --version
+          pre-commit --version
+
+      - name: Run actionlint
+        run: |
+          set -euo pipefail
+          actionlint
+
+      - name: Run Repo-Local Gates
+        run: |
+          set -euo pipefail
+          pre-commit run --all-files
+
+      - name: Checkout Packer Framework Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          path: aws-packer-framework
+          persist-credentials: false
+          # Initial framework scaffold — amazon-ebs contract with source_ami guard.
+          ref: bc4377b972c8e8587c750542d9496fd78c314f22
+          repository: nwarila-platform/aws-packer-framework
+
+      - name: Checkout Ansible Framework Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          path: ansible-framework
+          persist-credentials: false
+          ref: e8b2b95ead21c56da13ac1b41fe54569a69a2977
+          repository: nwarila-platform/ansible-framework
+
+      - name: Sync Consumer Files Into Framework Checkout
+        run: |
+          set -euo pipefail
+
+          destination_dir="${GITHUB_WORKSPACE}/aws-packer-framework/packer"
+
+          cp -f "${GITHUB_WORKSPACE}/packer/systems.auto.pkrvars.hcl" "${destination_dir}/"
+          cp -f "${GITHUB_WORKSPACE}/packer/user-data.pkrtpl.hcl" "${destination_dir}/"
+          cp -f "${GITHUB_WORKSPACE}/packer/rhel-8.yml" "${destination_dir}/"
+
+      - name: Composed Validation
+        working-directory: ${{ github.workspace }}/aws-packer-framework/packer
+        env:
+          ANSIBLE_CONFIG: ${{ github.workspace }}/ansible-framework/ansible.cfg
+        run: |
+          set -euo pipefail
+
+          ansible-playbook --syntax-check -i localhost, -c local ./rhel-8.yml
+          packer init .
+          packer validate .

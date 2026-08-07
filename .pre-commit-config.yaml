@@ -1,0 +1,81 @@
+---
+minimum_pre_commit_version: "4.0.0"
+default_stages:
+  - pre-commit
+  - pre-push
+
+repos:
+  # -------------------------------------------------------------------------- #
+  #  General file hygiene                                                      #
+  # -------------------------------------------------------------------------- #
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-case-conflict
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+        args: ["--allow-multiple-documents", "--unsafe"]
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: trailing-whitespace
+
+  # -------------------------------------------------------------------------- #
+  #  Secret detection                                                          #
+  # -------------------------------------------------------------------------- #
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+        name: "gitleaks - detect hardcoded secrets"
+
+  # -------------------------------------------------------------------------- #
+  #  Packer formatting                                                         #
+  #  Full packer validate requires the framework checkout; PR Verify runs the  #
+  #  composed validation. Local hooks keep the inventory canonically formatted.#
+  # -------------------------------------------------------------------------- #
+  - repo: local
+    hooks:
+      - id: packer-fmt
+        name: "packer fmt - enforce canonical HCL formatting"
+        language: system
+        entry: packer fmt -check -recursive
+        files: '\.pkr\.hcl$|\.pkrvars\.hcl$'
+        pass_filenames: false
+        args: ["packer/"]
+
+  # -------------------------------------------------------------------------- #
+  #  YAML linting                                                              #
+  # -------------------------------------------------------------------------- #
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        name: "yamllint - lint YAML files"
+        args: ["-c", ".config/.yamllint.yaml"]
+
+  # -------------------------------------------------------------------------- #
+  #  Markdown linting                                                          #
+  # -------------------------------------------------------------------------- #
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.48.0
+    hooks:
+      - id: markdownlint
+        name: "markdownlint - lint Markdown files"
+        args: ["--config", ".config/.markdownlint.json"]
+
+  # -------------------------------------------------------------------------- #
+  #  Commit message linting (Conventional Commits)                             #
+  # -------------------------------------------------------------------------- #
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        name: "conventional-commits - enforce commit message format"
+        stages: [commit-msg]
+        args: ["feat", "fix", "ci", "docs", "refactor", "test", "chore", "security"]
