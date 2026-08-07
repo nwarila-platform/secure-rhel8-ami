@@ -50,6 +50,20 @@
           "ec2:CreateAction": "CreateSecurityGroup"
         }
       }
+    },
+    {
+      "Sid": "TemporarySecurityGroupDeleteOnlyOurs",
+      "Effect": "Allow",
+      "Action": "ec2:DeleteSecurityGroup",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+        },
+        "ArnEquals": {
+          "ec2:Vpc": "arn:aws:ec2:<region>:<account-id>:vpc/<vpc-id>"
+        }
+      }
     }
   ]
 }
