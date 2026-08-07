@@ -31,7 +31,8 @@
 #
 # Substitution values are resolved from the live account and the live GitHub repository, never
 # hand-typed: the account from sts, the repository and owner ids from the GitHub API, and the
-# VPC from the deploy environment.
+# VPC from the deploy environment. The SSO permission set for the -admin trust defaults to
+# AdministratorAccess and can be overridden with SSO_PERMISSION_SET.
 # =========================================================================================== #
 set -uo pipefail
 
@@ -68,16 +69,18 @@ ACCOUNT="$(aws sts get-caller-identity "${AWSARGS[@]}" --query Account --output 
 REPO_ID="$(gh api "repos/${OWNER}/${REPO}" --jq .id)" || die "GitHub repo ${OWNER}/${REPO} not found"
 OWNER_ID="$(gh api "orgs/${OWNER}" --jq .id)" || die "cannot resolve owner id for ${OWNER}"
 VPC_ID="$(aws ec2 describe-vpcs "${AWSARGS[@]}" --query 'Vpcs[0].VpcId' --output text)" || die 'cannot resolve VPC'
+SSO_PS="${SSO_PERMISSION_SET:-AdministratorAccess}"
 say 'account / region' "${ACCOUNT} / ${REGION}"
 say 'repository id / owner id' "${REPO_ID} / ${OWNER_ID}"
-say 'vpc' "${VPC_ID}"
+say 'vpc / sso permission set' "${VPC_ID} / ${SSO_PS}"
 
 echo "== materialize =="
 mkdir -p "${WORK}/policies" "${WORK}/roles"
 cp "${IAM_DIR}/policies/"*.json "${WORK}/policies/"
 cp "${IAM_DIR}/roles/"*.json    "${WORK}/roles/"
 sed -i "s|<account-id>|${ACCOUNT}|g; s|<repository-id>|${REPO_ID}|g; s|<owner-id>|${OWNER_ID}|g;
-        s|<region>|${REGION}|g; s|<vpc-id>|${VPC_ID}|g" "${WORK}"/policies/*.json "${WORK}"/roles/*.json
+        s|<region>|${REGION}|g; s|<vpc-id>|${VPC_ID}|g; s|<sso-permission-set>|${SSO_PS}|g" \
+        "${WORK}"/policies/*.json "${WORK}"/roles/*.json
 
 "${ROOT}/scripts/check-iam-literals.sh" --materialized "${WORK}" >/dev/null \
   || die 'the materialized tree failed the substitution gate — do not apply'
@@ -103,20 +106,21 @@ done
 
 # ---- the declared object model, per tier ----------------------------------------------------
 BUILD_ROLE="github_${OWNER}_${REPO}"
-IAM_ROLE="github_${OWNER}_${REPO}-iam"
+ADMIN_ROLE="github_${OWNER}_${REPO}-admin"
 BUILD_POLICY="${REPO}_packer-build"
 BOUNDARY_POLICY="${REPO}_boundary"
 MANAGE_POLICY="${REPO}_iam-manage"
+ADMIN_POLICY="${REPO}_iam-admin"
 BOUNDARY_ARN="arn:aws:iam::${ACCOUNT}:policy/${BOUNDARY_POLICY}"
 
 if [ "${TIER}" = 'repo' ]; then
     POLICIES=("${BUILD_POLICY}")
     ROLE_PAIRS=("${BUILD_ROLE}:${BUILD_ROLE}.trust.json")
-    ATTACHMENTS=("${BUILD_ROLE}:${BUILD_POLICY}")
+    ATTACHMENTS=("${BUILD_ROLE}:${BUILD_POLICY}" "${BUILD_ROLE}:${MANAGE_POLICY}")
 else
-    POLICIES=("${BOUNDARY_POLICY}" "${MANAGE_POLICY}")
-    ROLE_PAIRS=("${IAM_ROLE}:${IAM_ROLE}.trust.json")
-    ATTACHMENTS=("${IAM_ROLE}:${MANAGE_POLICY}")
+    POLICIES=("${BOUNDARY_POLICY}" "${MANAGE_POLICY}" "${ADMIN_POLICY}")
+    ROLE_PAIRS=("${ADMIN_ROLE}:${ADMIN_ROLE}.trust.json")
+    ATTACHMENTS=("${ADMIN_ROLE}:${BUILD_POLICY}" "${ADMIN_ROLE}:${ADMIN_POLICY}")
 fi
 
 exists_policy() { aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT}:policy/$1" "${AWSARGS[@]}" >/dev/null 2>&1; }
