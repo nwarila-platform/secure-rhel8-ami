@@ -134,6 +134,20 @@
           "ec2:Vpc": "arn:aws:ec2:<region>:<account-id>:vpc/<vpc-id>"
         }
       }
+    },
+    {
+      "Sid": "RunInstancesVolumeLegEncryptedCapped",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:volume/*",
+      "Condition": {
+        "Bool": {
+          "ec2:Encrypted": "true"
+        },
+        "NumericLessThanEquals": {
+          "ec2:VolumeSize": 30
+        }
+      }
     }
   ]
 }
