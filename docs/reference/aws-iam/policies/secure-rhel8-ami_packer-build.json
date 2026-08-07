@@ -5,6 +5,7 @@
       "Sid": "DiscoveryDescribes",
       "Effect": "Allow",
       "Action": [
+        "ec2:DescribeImages",
         "ec2:DescribeRegions"
       ],
       "Resource": "*"
