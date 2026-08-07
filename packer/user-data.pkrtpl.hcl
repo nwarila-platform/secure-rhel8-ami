@@ -13,6 +13,7 @@
 timezone: ${os_timezone}
 locale: ${os_language}
 
-# ansible-core 2.20 needs a modern target interpreter; stock RHEL 8 python3 is 3.6.
+# Ansible against RHEL 8 targets runs on the platform-python stack (ansible-core 2.16);
+# python3 is installed for anything that shells out to an unversioned interpreter.
 packages:
-  - python3.12
+  - python3
