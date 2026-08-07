@@ -186,6 +186,12 @@
           "ec2:Attribute": "EnaSupport"
         }
       }
+    },
+    {
+      "Sid": "SurrogateSnapshotCreateSnapshotLeg",
+      "Effect": "Allow",
+      "Action": "ec2:CreateSnapshot",
+      "Resource": "arn:aws:ec2:<region>::snapshot/*"
     }
   ]
 }
