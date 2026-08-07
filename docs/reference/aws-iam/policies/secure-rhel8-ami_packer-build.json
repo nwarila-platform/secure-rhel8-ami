@@ -107,6 +107,17 @@
       "Resource": [
         "arn:aws:ec2:<region>:<account-id>:key-pair/packer_*"
       ]
+    },
+    {
+      "Sid": "RunInstancesEniLegSubnetPinned",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:network-interface/*",
+      "Condition": {
+        "ArnEquals": {
+          "ec2:Subnet": "arn:aws:ec2:<region>:<account-id>:subnet/<subnet-id>"
+        }
+      }
     }
   ]
 }

@@ -65,6 +65,7 @@ readonly -a REQUIRED_PLACEHOLDERS=(
     '<owner-id>'
     '<region>'
     '<vpc-id>'
+    '<subnet-id>'
     '<sso-permission-set>'
 )
 
