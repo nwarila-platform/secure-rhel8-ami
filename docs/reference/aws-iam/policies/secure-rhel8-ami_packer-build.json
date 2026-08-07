@@ -174,6 +174,18 @@
           "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
         }
       }
+    },
+    {
+      "Sid": "EnaFlagOnlyOnOurInstances",
+      "Effect": "Allow",
+      "Action": "ec2:ModifyInstanceAttribute",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>",
+          "ec2:Attribute": "EnaSupport"
+        }
+      }
     }
   ]
 }
