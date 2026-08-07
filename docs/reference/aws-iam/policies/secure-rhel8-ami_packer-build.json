@@ -56,9 +56,12 @@
       }
     },
     {
-      "Sid": "TemporarySecurityGroupDeleteOnlyOurs",
+      "Sid": "TemporarySecurityGroupLifecycleOnlyOurs",
       "Effect": "Allow",
-      "Action": "ec2:DeleteSecurityGroup",
+      "Action": [
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:DeleteSecurityGroup"
+      ],
       "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*",
       "Condition": {
         "StringEquals": {
