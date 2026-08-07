@@ -250,6 +250,17 @@
       "Effect": "Allow",
       "Action": "ec2:RegisterImage",
       "Resource": "arn:aws:ec2:<region>::image/*"
+    },
+    {
+      "Sid": "ImageDescriptionOnly",
+      "Effect": "Allow",
+      "Action": "ec2:ModifyImageAttribute",
+      "Resource": "arn:aws:ec2:<region>::image/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:Attribute": "Description"
+        }
+      }
     }
   ]
 }
