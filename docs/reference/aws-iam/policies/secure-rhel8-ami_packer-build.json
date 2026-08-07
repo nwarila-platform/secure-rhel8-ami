@@ -119,6 +119,20 @@
           "ec2:Subnet": "arn:aws:ec2:<region>:<account-id>:subnet/<subnet-id>"
         }
       }
+    },
+    {
+      "Sid": "RunInstancesSecurityGroupLegOnlyOurs",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+        },
+        "ArnEquals": {
+          "ec2:Vpc": "arn:aws:ec2:<region>:<account-id>:vpc/<vpc-id>"
+        }
+      }
     }
   ]
 }
