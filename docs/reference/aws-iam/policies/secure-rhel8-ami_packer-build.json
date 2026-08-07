@@ -148,6 +148,17 @@
           "ec2:VolumeSize": 30
         }
       }
+    },
+    {
+      "Sid": "RunInstancesImageLegPinnedOwner",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:<region>::image/ami-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceAccount": "<source-ami-owner>"
+        }
+      }
     }
   ]
 }
