@@ -7,13 +7,14 @@
 #           substitution gate on every change to the IAM sources or the scripts, because the
 #           gate is only a control if it runs.
 #
-#   manage  The workflow-managed apply. Assumes github_nwarila-platform_secure-rhel8-ami-iam
-#           via OIDC — a role whose trust is pinned to THIS workflow file and whose policy can
-#           manage only this repository's build role and build policy, cannot touch itself,
-#           its own policy, or the permissions boundary, and can only attach this repo's
-#           policy. The governance layer (boundary, iam-manage, the -iam role) is
-#           operator-tier: scripts/bootstrap-iam.sh --tier operator, run deliberately with SSO
-#           credentials, never from CI.
+#   manage  The workflow-managed apply. Assumes the repository's non-admin role via OIDC
+#           (its trust lists exactly packer.yaml and iam.yml). The attached iam-manage policy
+#           can manage only this repository's build policy and the role's own trust/boundary/
+#           attachments, can attach only this repo's policies, and carries explicit Denies on
+#           the -admin role, the boundary, and both governance policies. The governance layer
+#           (boundary, iam-manage, iam-admin, the -admin role) is operator-tier:
+#           scripts/bootstrap-iam.sh --tier operator, run personally via the -admin SSO path,
+#           never from CI.
 # =========================================================================================== #
 name: 'AWS IAM'
 
