@@ -230,6 +230,26 @@
           "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
         }
       }
+    },
+    {
+      "Sid": "RegisterImageFromOurTaggedEncryptedSnapshot",
+      "Effect": "Allow",
+      "Action": "ec2:RegisterImage",
+      "Resource": "arn:aws:ec2:<region>::snapshot/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+        },
+        "Bool": {
+          "ec2:Encrypted": "true"
+        }
+      }
+    },
+    {
+      "Sid": "RegisterImageImageLeg",
+      "Effect": "Allow",
+      "Action": "ec2:RegisterImage",
+      "Resource": "arn:aws:ec2:<region>::image/*"
     }
   ]
 }
