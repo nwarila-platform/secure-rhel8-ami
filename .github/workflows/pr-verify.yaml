@@ -96,8 +96,8 @@ jobs:
           fetch-depth: 1
           path: aws-packer-framework
           persist-credentials: false
-          # Initial framework scaffold — amazon-ebs contract with source_ami guard.
-          ref: bc4377b972c8e8587c750542d9496fd78c314f22
+          # feat: amazon-ebssurrogate source for custom partition layouts (#1)
+          ref: 3dbc496ae77cbedfe54486bcce9e566503523db6
           repository: nwarila-platform/aws-packer-framework
 
       - name: Checkout Ansible Framework Repository

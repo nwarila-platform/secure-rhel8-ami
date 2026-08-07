@@ -1,66 +1,38 @@
 {
   "default": true,
-
   "MD003": { "style": "atx" },
   "MD004": { "style": "dash" },
-
-  "MD009": {
-    "br_spaces": 2,
-    "code_blocks": false,
-    "list_item_empty_lines": false,
-    "strict": true
-  },
-
-  "MD010": {
-    "code_blocks": true,
-    "ignore_code_languages": ["makefile"],
-    "spaces_per_tab": 4
-  },
-
+  "MD009": { "br_spaces": 2, "strict": true },
+  "MD010": { "spaces_per_tab": 4 },
   "MD013": {
     "line_length": 120,
     "heading_line_length": 100,
+    "code_block_line_length": 120,
     "code_blocks": false,
-    "tables": false,
-    "stern": true
+    "tables": false
   },
-
   "MD024": { "siblings_only": true },
-
-  "MD029": { "style": "one" },
-
+  "MD029": false,
+  "MD034": false,
   "MD033": {
-    "allowed_elements": ["details", "summary", "kbd", "sub", "sup", "picture", "source", "img"],
-    "table_allowed_elements": ["br"]
+    "allowed_elements": [
+      "details",
+      "summary",
+      "kbd",
+      "sub",
+      "sup",
+      "picture",
+      "source",
+      "img",
+      "br"
+    ]
   },
-
   "MD035": { "style": "---" },
-
-  "MD040": {
-    "allowed_languages": [],
-    "language_only": true
-  },
-
-  "MD041": {
-    "allow_preamble": true,
-    "front_matter_title": "^\\s*title\\s*[:=]",
-    "level": 1
-  },
-
+  "MD040": true,
+  "MD041": { "level": 1 },
   "MD046": { "style": "fenced" },
   "MD048": { "style": "backtick" },
   "MD049": { "style": "asterisk" },
   "MD050": { "style": "asterisk" },
-
-  "MD054": {
-    "autolink": true,
-    "inline": true,
-    "full": true,
-    "collapsed": true,
-    "shortcut": false,
-    "url_inline": false
-  },
-
-  "MD055": { "style": "leading_and_trailing" },
-  "MD060": { "style": "compact", "aligned_delimiter": true }
+  "MD060": false
 }

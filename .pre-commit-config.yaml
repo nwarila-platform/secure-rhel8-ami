@@ -15,6 +15,7 @@ repos:
         args: ["--maxkb=1024"]
       - id: check-case-conflict
       - id: check-json
+        exclude: '^\.vscode/.*\.json$'
       - id: check-merge-conflict
       - id: check-symlinks
       - id: check-yaml
@@ -68,6 +69,7 @@ repos:
       - id: markdownlint
         name: "markdownlint - lint Markdown files"
         args: ["--config", ".config/.markdownlint.json"]
+        files: '^(README\.md|CONTRIBUTING\.md|SECURITY\.md)$'
 
   # -------------------------------------------------------------------------- #
   #  Commit message linting (Conventional Commits)                             #

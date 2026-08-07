@@ -80,13 +80,18 @@ packer_image = {
     ManagedBy  = "aws-packer-framework"
     Repository = "nwarila-platform/secure-rhel8-ami"
   }
+  # The nwarila:management:repository-id tag is the IAM identity boundary: the build role's
+  # RunInstances grant requires it at launch and its lifecycle grants are gated on it (see
+  # docs/reference/aws-iam/). Removing it fails the build closed.
   run_tags = {
-    Name      = "packer-build-secure-rhel8"
-    ManagedBy = "aws-packer-framework"
+    Name                               = "packer-build-secure-rhel8"
+    ManagedBy                          = "aws-packer-framework"
+    "nwarila:management:repository-id" = "1326894519"
   }
   snapshot_tags = {
-    Name      = "secure-rhel8"
-    ManagedBy = "aws-packer-framework"
+    Name                               = "secure-rhel8"
+    ManagedBy                          = "aws-packer-framework"
+    "nwarila:management:repository-id" = "1326894519"
   }
 
   # Build Instance
@@ -119,6 +124,22 @@ launch_block_device_mappings = [
 ]
 
 ami_block_device_mappings = []
+
+# --- Surrogate Volume -------------------------------------------------------------------- #
+# Blank volume the STIG-partitioned image is assembled onto (see the second play in
+# rhel-8.yml). The framework's amazon-ebssurrogate source attaches it at device_name and
+# registers the AMI from it as ami_root_device_name. Builds select this path explicitly:
+# packer build -only=amazon-ebssurrogate.packer_image
+surrogate = {
+  device_name          = "/dev/xvdf"
+  ami_root_device_name = "/dev/sda1"
+  volume_size          = 30
+  volume_type          = "gp3"
+  iops                 = 3000
+  throughput           = 125
+  encrypted            = true
+  kms_key_id           = null
+}
 
 # NOTE: temporary_security_group_source_cidrs = ["0.0.0.0/0"] is a bootstrap EXCEPTION for
 # default-VPC builds. Scope this to the CI egress CIDR, or switch
