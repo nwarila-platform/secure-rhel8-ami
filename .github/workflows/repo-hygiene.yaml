@@ -1,11 +1,11 @@
 name: Repo Hygiene
 
 # Single visible entrypoint for the org-wide repo-hygiene policy. Delegates to
-# the org-owned reusable, which evaluates NWarila/.github's repo_hygiene.rego
+# the org-owned reusable, which evaluates nwarila-platform/.github's repo_hygiene.rego
 # (SHA-pinned uses:, exact dependency pins where applicable, pull_request_target
 # safety) against this repo's checked-out tree. No local policy file or
 # input-builder is mirrored here - the reusable sources both from
-# NWarila/.github at source_ref.
+# nwarila-platform/.github at source_ref.
 
 on:
   pull_request:
@@ -26,6 +26,6 @@ jobs:
     name: repo-hygiene
     permissions:
       contents: read
-    uses: NWarila/.github/.github/workflows/reusable-repo-hygiene.yaml@e7456b0219e8750fbef8bd70a0f1ccf7d47f1c20
+    uses: nwarila-platform/.github/.github/workflows/reusable-repo-hygiene.yaml@0d2a0752d4c618907d735af4a7c12a9214c8517e # nwarila-platform/.github main @ 2026-06-06
     with:
-      source_ref: e7456b0219e8750fbef8bd70a0f1ccf7d47f1c20
+      source_ref: 0d2a0752d4c618907d735af4a7c12a9214c8517e

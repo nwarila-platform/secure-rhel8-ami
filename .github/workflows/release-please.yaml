@@ -25,4 +25,4 @@ jobs:
       pull-requests: write
       issues: write
       actions: write
-    uses: NWarila/.github/.github/workflows/reusable-release-please.yaml@e7456b0219e8750fbef8bd70a0f1ccf7d47f1c20
+    uses: nwarila-platform/.github/.github/workflows/reusable-release-please.yaml@1923b2d024800b0bd11eb72de9af7c5788ffade1 # nwarila-platform/.github main @ 2026-07-30
