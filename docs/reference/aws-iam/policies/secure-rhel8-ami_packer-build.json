@@ -39,6 +39,17 @@
       "Effect": "Allow",
       "Action": "ec2:CreateSecurityGroup",
       "Resource": "arn:aws:ec2:<region>:<account-id>:vpc/<vpc-id>"
+    },
+    {
+      "Sid": "TagSecurityGroupOnCreate",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:CreateAction": "CreateSecurityGroup"
+        }
+      }
     }
   ]
 }
