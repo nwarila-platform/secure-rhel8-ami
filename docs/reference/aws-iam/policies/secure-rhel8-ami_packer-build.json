@@ -192,6 +192,17 @@
       "Effect": "Allow",
       "Action": "ec2:CreateSnapshot",
       "Resource": "arn:aws:ec2:<region>::snapshot/*"
+    },
+    {
+      "Sid": "TagSnapshotOnCreate",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "arn:aws:ec2:<region>::snapshot/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:CreateAction": "CreateSnapshot"
+        }
+      }
     }
   ]
 }
