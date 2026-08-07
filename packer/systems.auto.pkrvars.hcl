@@ -141,12 +141,15 @@ surrogate = {
   kms_key_id           = null
 }
 
-# NOTE: temporary_security_group_source_cidrs = ["0.0.0.0/0"] is a bootstrap EXCEPTION for
-# default-VPC builds. Scope this to the CI egress CIDR, or switch
-# ssh_interface = "session_manager" with an instance profile and no inbound rules at all.
+# Placement is pinned deliberately: an explicit VPC makes the IAM authorization context carry
+# a concrete VPC ARN, letting the build policy pin CreateSecurityGroup to exactly this VPC
+# (a null vpc_id evaluates as vpc/* and forces a wildcard grant).
+# NOTE: temporary_security_group_source_cidrs = ["0.0.0.0/0"] is a bootstrap EXCEPTION.
+# Scope this to the CI egress CIDR, or switch ssh_interface = "session_manager" with an
+# instance profile and no inbound rules at all.
 vpc_config = {
-  vpc_id                                = null
-  subnet_id                             = null
+  vpc_id                                = "vpc-024afb5e25a56792c"
+  subnet_id                             = "subnet-01a8835a525008dfc"
   security_group_ids                    = null
   associate_public_ip_address           = true
   temporary_security_group_source_cidrs = ["0.0.0.0/0"]
