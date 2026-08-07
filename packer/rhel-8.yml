@@ -44,6 +44,18 @@
       ansible.builtin.raw: command -v /usr/bin/python3 >/dev/null 2>&1 || dnf install -y python3
       changed_when: false
 
+    # Packer's Ansible proxy adapter serves SFTP by executing /usr/lib/sftp-server on the
+    # target, but RHEL ships it at /usr/libexec/openssh/sftp-server — without this link the
+    # first module transfer dies with "bash: /usr/lib/sftp-server: No such file or directory"
+    # (same normalization secure-rockylinux9-template carries).
+    - name: Normalize the SFTP server path for the build transport
+      ansible.builtin.raw: |
+        set -e
+        if [ -x /usr/libexec/openssh/sftp-server ] && [ ! -e /usr/lib/sftp-server ]; then
+          ln -s /usr/libexec/openssh/sftp-server /usr/lib/sftp-server
+        fi
+      changed_when: false
+
 - name: RHEL 8 Bootstrap and Hardening
   hosts: all
   gather_facts: false
