@@ -224,7 +224,17 @@
       ansible.builtin.shell: |
         set -euo pipefail
         truncate -s 0 {{ sysimage }}/etc/machine-id
-        umount -R {{ sysimage }}
-        vgchange -an sysvg
+        sync
+        umount -R {{ sysimage }} || { sleep 3; umount -R {{ sysimage }}; } || umount -R -l {{ sysimage }}
+        udevadm settle
+        # Deactivation is belt-and-braces: Packer stops the instance before snapshotting,
+        # which flushes everything. A transient holder (udev scan) can keep the LV open
+        # briefly right after umount, so retry and then tolerate.
+        deactivated=no
+        for attempt in 1 2 3 4 5; do
+          if vgchange -an sysvg; then deactivated=yes; break; fi
+          sleep 3
+        done
+        [ "${deactivated}" = "yes" ] || echo "vgchange -an did not succeed; relying on instance stop to flush"
         sync
       changed_when: true
