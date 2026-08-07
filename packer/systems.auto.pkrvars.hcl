@@ -38,9 +38,7 @@ ansible_config = {
   requirements_path = null
   roles_path        = "../../ansible-framework"
   config_path       = "../../ansible-framework/ansible.cfg"
-  extra_vars = {
-    ansible_python_interpreter = "/usr/bin/python3.12"
-  }
+  extra_vars        = {}
 }
 
 # --- Packer Image ------------------------------------------------------------------------ #
