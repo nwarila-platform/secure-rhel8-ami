@@ -13,6 +13,6 @@
 timezone: ${os_timezone}
 locale: ${os_language}
 
-# Ensure Ansible's default interpreter discovery finds a Python 3 runtime on first boot.
+# ansible-core 2.20 needs a modern target interpreter; stock RHEL 8 python3 is 3.6.
 packages:
-  - python3
+  - python3.12
