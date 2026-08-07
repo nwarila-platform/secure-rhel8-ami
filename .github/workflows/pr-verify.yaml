@@ -71,7 +71,7 @@ jobs:
 
           python3 -m pip install --upgrade --disable-pip-version-check pip
           python3 -m pip install --disable-pip-version-check --no-input \
-            ansible-core==2.20.4 \
+            ansible-core==2.16.14 \
             pre-commit==4.5.1 \
             PyYAML==6.0.3
 
