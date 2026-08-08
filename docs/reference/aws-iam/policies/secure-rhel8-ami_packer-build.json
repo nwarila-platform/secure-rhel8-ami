@@ -252,13 +252,16 @@
       "Resource": "arn:aws:ec2:<region>::image/*"
     },
     {
-      "Sid": "ImageDescriptionOnly",
+      "Sid": "ImageAttributesAllowlisted",
       "Effect": "Allow",
       "Action": "ec2:ModifyImageAttribute",
       "Resource": "arn:aws:ec2:<region>::image/*",
       "Condition": {
         "StringEquals": {
-          "ec2:Attribute": "Description"
+          "ec2:Attribute": [
+            "Description",
+            "ImdsSupport"
+          ]
         }
       }
     }
