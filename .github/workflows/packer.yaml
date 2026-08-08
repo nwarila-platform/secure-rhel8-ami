@@ -84,8 +84,8 @@ jobs:
           fetch-depth: 1
           path: aws-packer-framework
           persist-credentials: false
-          # fix: proxyless SSH Ansible provisioner (#2)
-          ref: 4302430ca46a7db69192dc66b77a37c9c26ce238
+          # feat: surrogate boot_mode (RegisterImage) (#3)
+          ref: 04ba9964c433800466d432f293008677b19f8b8f
           repository: nwarila-platform/aws-packer-framework
 
       - name: Checkout Ansible Framework Repository
