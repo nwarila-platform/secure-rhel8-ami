@@ -133,12 +133,14 @@ ami_block_device_mappings = []
 surrogate = {
   device_name          = "/dev/xvdf"
   ami_root_device_name = "/dev/sda1"
-  volume_size          = 30
-  volume_type          = "gp3"
-  iops                 = 3000
-  throughput           = 125
-  encrypted            = true
-  kms_key_id           = null
+  # BIOS/GPT layout with embedded GRUB and no EFI system partition (see rhel-8.yml play 2).
+  boot_mode   = "legacy-bios"
+  volume_size = 30
+  volume_type = "gp3"
+  iops        = 3000
+  throughput  = 125
+  encrypted   = true
+  kms_key_id  = null
 }
 
 # Placement is pinned deliberately: an explicit VPC makes the IAM authorization context carry
