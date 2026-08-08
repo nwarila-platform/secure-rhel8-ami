@@ -210,7 +210,15 @@
         sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"rd.lvm.lv=sysvg/lv_root ${existing_args}\"|" \
           {{ sysimage }}/etc/default/grub
 
+        # At build time the surrogate is the SECOND disk, so a bare grub2-install embeds
+        # (hd1) as its root — but in the registered AMI this volume boots as the ONLY disk
+        # (hd0), leaving GRUB in a silent rescue prompt (proven by snapshot autopsy of
+        # ami-08e5a438b2c75c476: core embedded, kernelopts correct, no serial output).
+        # A device.map pins the surrogate as hd0 for the install, and is removed afterward
+        # so the running system never sees a stale mapping.
+        printf '(hd0) %s\n' "{{ surrogate_dev }}" > {{ sysimage }}/boot/grub2/device.map
         chroot {{ sysimage }} grub2-install --target=i386-pc "{{ surrogate_dev }}"
+        rm -f {{ sysimage }}/boot/grub2/device.map
         kver="$(chroot {{ sysimage }} sh -c 'ls /lib/modules' | sort -V | tail -1)"
         chroot {{ sysimage }} dracut -f --add lvm "/boot/initramfs-${kver}.img" "${kver}"
         chroot {{ sysimage }} grub2-mkconfig -o /boot/grub2/grub.cfg
