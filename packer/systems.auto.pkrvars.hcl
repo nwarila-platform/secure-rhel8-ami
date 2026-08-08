@@ -133,8 +133,9 @@ ami_block_device_mappings = []
 surrogate = {
   device_name          = "/dev/xvdf"
   ami_root_device_name = "/dev/sda1"
-  # BIOS/GPT layout with embedded GRUB and no EFI system partition (see rhel-8.yml play 2).
-  boot_mode   = "legacy-bios"
+  # UEFI/GPT layout with an EFI system partition and shim+grub2-efi (see rhel-8.yml play 2).
+  # The framework hard-blocks anything but "uefi".
+  boot_mode   = "uefi"
   volume_size = 30
   volume_type = "gp3"
   iops        = 3000
