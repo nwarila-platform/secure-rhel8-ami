@@ -84,8 +84,8 @@ jobs:
           fetch-depth: 1
           path: aws-packer-framework
           persist-credentials: false
-          # feat: surrogate boot_mode (RegisterImage) (#3)
-          ref: 04ba9964c433800466d432f293008677b19f8b8f
+          # feat: hard-block BIOS, UEFI-only surrogate (#4)
+          ref: 243f58a7fe43522a452a65d7e918d33bc5e4add2
           repository: nwarila-platform/aws-packer-framework
 
       - name: Checkout Ansible Framework Repository
