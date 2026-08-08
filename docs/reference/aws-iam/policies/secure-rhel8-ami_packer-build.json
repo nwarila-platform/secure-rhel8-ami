@@ -275,6 +275,17 @@
           "aws:ResourceAccount": "<account-id>"
         }
       }
+    },
+    {
+      "Sid": "RetagOurTaggedSnapshots",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "arn:aws:ec2:<region>::snapshot/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+        }
+      }
     }
   ]
 }
