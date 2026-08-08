@@ -10,9 +10,10 @@
 #      play changes is copied into the image by play 2.                                         #
 #                                                                                               #
 #   2. Surrogate image assembly — partitions the blank surrogate volume into the org's STIG     #
-#      layout (mirroring proxmox-packer-framework's Kickstart layout: /boot + LVM sysvg with    #
-#      separate /home /opt /tmp /var /var/tmp /var/log /var/log/audit), copies the configured   #
-#      root filesystem in with credential/state excludes, installs the bootloader, and leaves   #
+#      layout (mirroring proxmox-packer-framework's UEFI Kickstart layout: EFI system         #
+#      partition + /boot + LVM sysvg with separate /home /opt /tmp /var /var/tmp /var/log      #
+#      /var/log/audit), copies the configured root in with credential/state excludes, installs  #
+#      shim+grub2-efi, and leaves the volume ready for amazon-ebssurrogate to register (UEFI).  #
 #      the volume ready for the framework's amazon-ebssurrogate source to register as the AMI.  #
 #      The excludes are the zero-persistent-credential guarantee: no authorized_keys, no SSH    #
 #      host keys, no machine-id, no cloud-init state, and no build logs survive into the AMI.   #
@@ -75,7 +76,7 @@
     - name: Install imaging tooling (also lands in the image, which needs lvm2 to boot)
       ansible.builtin.shell: |
         set -euo pipefail
-        dnf install -y lvm2 parted e2fsprogs rsync
+        dnf install -y lvm2 parted e2fsprogs rsync dosfstools grub2-efi-x64 shim-x64 efibootmgr
       changed_when: true
 
     - name: Resolve the blank surrogate disk (the only unmounted, unpartitioned disk)
@@ -99,14 +100,14 @@
       ansible.builtin.set_fact:
         surrogate_dev: "{{ surrogate_disk.stdout_lines[-1] }}"
 
-    - name: Partition surrogate disk (GPT — BIOS boot, /boot, LVM PV)
+    - name: Partition surrogate disk (GPT — EFI system partition, /boot, LVM PV)
       ansible.builtin.shell: |
         set -euo pipefail
         parted -s "{{ surrogate_dev }}" mklabel gpt
-        parted -s "{{ surrogate_dev }}" mkpart biosboot 1MiB 2MiB
-        parted -s "{{ surrogate_dev }}" set 1 bios_grub on
-        parted -s "{{ surrogate_dev }}" mkpart boot 2MiB 1026MiB
-        parted -s "{{ surrogate_dev }}" mkpart pv 1026MiB 100%
+        parted -s "{{ surrogate_dev }}" mkpart EFI fat32 1MiB 513MiB
+        parted -s "{{ surrogate_dev }}" set 1 esp on
+        parted -s "{{ surrogate_dev }}" mkpart boot ext4 513MiB 1537MiB
+        parted -s "{{ surrogate_dev }}" mkpart pv 1537MiB 100%
         udevadm settle
       changed_when: true
 
@@ -128,6 +129,7 @@
         lvcreate -y -L 1G    -n lv_var_tmp  sysvg
         lvcreate -y -L 4G    -n lv_var_log  sysvg
         lvcreate -y -L 500M  -n lv_var_audit sysvg
+        mkfs.vfat -F32 -n EFIFS      "${p}1"
         mkfs.ext4 -q -F -L BOOTFS    "${p}2"
         mkfs.ext4 -q -F -L ROOTFS    /dev/sysvg/lv_root
         mkfs.ext4 -q -F -L HOMEFS    /dev/sysvg/lv_home
@@ -152,6 +154,8 @@
         mkdir -p {{ sysimage }}/boot {{ sysimage }}/home {{ sysimage }}/opt \
                  {{ sysimage }}/tmp {{ sysimage }}/var
         mount "${p}2"                {{ sysimage }}/boot
+        mkdir -p {{ sysimage }}/boot/efi
+        mount "${p}1"                {{ sysimage }}/boot/efi
         mount /dev/sysvg/lv_home    {{ sysimage }}/home
         mount /dev/sysvg/lv_opt     {{ sysimage }}/opt
         mount /dev/sysvg/lv_tmp     {{ sysimage }}/tmp
@@ -187,8 +191,9 @@
         group: root
         mode: "0644"
         content: |
-          LABEL=ROOTFS    /               ext4  defaults                     1 1
-          LABEL=BOOTFS    /boot           ext4  defaults,nodev,nosuid        1 2
+          LABEL=ROOTFS    /               ext4  defaults                            1 1
+          LABEL=BOOTFS    /boot           ext4  defaults,nodev,nosuid               1 2
+          LABEL=EFIFS     /boot/efi       vfat  umask=0077,shortname=winnt,nodev,nosuid 0 2
           LABEL=HOMEFS    /home           ext4  defaults,nodev,nosuid        1 2
           LABEL=OPTFS     /opt            ext4  defaults,nodev               1 2
           LABEL=TMPFS     /tmp            ext4  defaults,nodev,noexec,nosuid 1 2
@@ -210,19 +215,26 @@
         sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"rd.lvm.lv=sysvg/lv_root ${existing_args}\"|" \
           {{ sysimage }}/etc/default/grub
 
-        # At build time the surrogate is the SECOND disk, so a bare grub2-install embeds
-        # (hd1) as its root — but in the registered AMI this volume boots as the ONLY disk
-        # (hd0), leaving GRUB in a silent rescue prompt (proven by snapshot autopsy of
-        # ami-08e5a438b2c75c476: core embedded, kernelopts correct, no serial output).
-        # A device.map pins the surrogate as hd0 for the install, and is removed afterward
-        # so the running system never sees a stale mapping.
-        printf '(hd0) %s\n' "{{ surrogate_dev }}" > {{ sysimage }}/boot/grub2/device.map
-        chroot {{ sysimage }} grub2-install --target=i386-pc "{{ surrogate_dev }}"
-        rm -f {{ sysimage }}/boot/grub2/device.map
+        # UEFI install: RHEL ships the signed EFI binaries via grub2-efi-x64 + shim-x64
+        # into /boot/efi/EFI/redhat/. grubx64.efi is built with prefix /EFI/redhat, so it
+        # reads /boot/efi/EFI/redhat/grub.cfg wherever it is launched from.
+        mount -t efivarfs efivarfs {{ sysimage }}/sys/firmware/efi/efivars 2>/dev/null || true
+        chroot {{ sysimage }} dnf reinstall -y grub2-efi-x64 shim-x64 || \
+          chroot {{ sysimage }} dnf install -y grub2-efi-x64 shim-x64
         kver="$(chroot {{ sysimage }} sh -c 'ls /lib/modules' | sort -V | tail -1)"
         chroot {{ sysimage }} dracut -f --add lvm "/boot/initramfs-${kver}.img" "${kver}"
-        chroot {{ sysimage }} grub2-mkconfig -o /boot/grub2/grub.cfg
-        chroot {{ sysimage }} grub2-editenv /boot/grub2/grubenv set kernelopts="${kernel_args}"
+        chroot {{ sysimage }} grub2-mkconfig -o /boot/efi/EFI/redhat/grub.cfg
+        chroot {{ sysimage }} grub2-editenv /boot/efi/EFI/redhat/grubenv set kernelopts="${kernel_args}"
+
+        # AWS UEFI firmware boots a freshly registered AMI (empty NVRAM) via the removable
+        # media path /EFI/BOOT/BOOTX64.EFI. Populate it from the signed RHEL binaries so the
+        # image boots without a pre-seeded boot entry: shim as BOOTX64.EFI, plus grubx64 and
+        # the Mok manager it chainloads.
+        install -d -m 0700 {{ sysimage }}/boot/efi/EFI/BOOT
+        cp -f {{ sysimage }}/boot/efi/EFI/redhat/shimx64.efi {{ sysimage }}/boot/efi/EFI/BOOT/BOOTX64.EFI
+        cp -f {{ sysimage }}/boot/efi/EFI/redhat/grubx64.efi {{ sysimage }}/boot/efi/EFI/BOOT/grubx64.efi
+        cp -f {{ sysimage }}/boot/efi/EFI/redhat/mmx64.efi \
+          {{ sysimage }}/boot/efi/EFI/BOOT/mmx64.efi 2>/dev/null || true
 
         # SELinux stays enforcing; relabel the copied tree on first boot.
         touch {{ sysimage }}/.autorelabel
