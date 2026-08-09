@@ -72,7 +72,7 @@ permission-set hash.
 
 ## Design notes
 
-- **Identity tag**: `nwarila:management:repository-id = <repository-id>`, applied by Packer's
+- **Identity tag**: `RepositoryId = <repository-id>`, applied by Packer's
   `run_tags`/`snapshot_tags` at create time (`aws:RequestTag` on the instance, volume, and
   snapshot legs) and required by `ec2:ResourceTag` on every mutating action. The committed
   inventory carries the tag; removing it from `systems.auto.pkrvars.hcl` fails the build closed.

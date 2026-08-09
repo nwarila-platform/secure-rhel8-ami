@@ -68,7 +68,7 @@
       "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*",
       "Condition": {
         "StringEquals": {
-          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
         },
         "ArnEquals": {
           "ec2:Vpc": "arn:aws:ec2:<region>:<account-id>:vpc/<vpc-id>"
@@ -131,7 +131,7 @@
       "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*",
       "Condition": {
         "StringEquals": {
-          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
         },
         "ArnEquals": {
           "ec2:Vpc": "arn:aws:ec2:<region>:<account-id>:vpc/<vpc-id>"
@@ -173,7 +173,7 @@
       "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
       "Condition": {
         "StringEquals": {
-          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
         }
       }
     },
@@ -184,7 +184,7 @@
       "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
       "Condition": {
         "StringEquals": {
-          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>",
+          "ec2:ResourceTag/RepositoryId": "<repository-id>",
           "ec2:Attribute": "EnaSupport"
         }
       }
@@ -227,7 +227,7 @@
       "Resource": "arn:aws:ec2:<region>::snapshot/*",
       "Condition": {
         "StringEquals": {
-          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
         }
       }
     },
@@ -238,7 +238,7 @@
       "Resource": "arn:aws:ec2:<region>::snapshot/*",
       "Condition": {
         "StringEquals": {
-          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
         },
         "Bool": {
           "ec2:Encrypted": "true"
@@ -283,7 +283,7 @@
       "Resource": "arn:aws:ec2:<region>::snapshot/*",
       "Condition": {
         "StringEquals": {
-          "ec2:ResourceTag/nwarila:management:repository-id": "<repository-id>"
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
         }
       }
     }
