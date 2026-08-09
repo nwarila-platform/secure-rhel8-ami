@@ -227,6 +227,15 @@
         chroot {{ sysimage }} grub2-mkconfig -o /boot/efi/EFI/redhat/grub.cfg
         chroot {{ sysimage }} grub2-editenv /boot/efi/EFI/redhat/grubenv set kernelopts="${kernel_args}"
 
+        # The BLS entries were copied from the source image, where /boot lives on the root
+        # filesystem, so their paths carry a /boot prefix. Here /boot is its own partition and
+        # GRUB resolves the paths against that partition's root; without stripping the prefix
+        # the kernel is never found and boot halts at the GRUB menu awaiting input. Entries
+        # written later by kernel updates on a running system are unaffected: grubby writes
+        # partition-relative paths when /boot is a mountpoint.
+        sed -i 's|^linux /boot/|linux /|; s|^initrd /boot/|initrd /|' \
+          {{ sysimage }}/boot/loader/entries/*.conf
+
         # AWS UEFI firmware boots a freshly registered AMI (empty NVRAM) via the removable
         # media path /EFI/BOOT/BOOTX64.EFI. Populate it from the signed RHEL binaries so the
         # image boots without a pre-seeded boot entry: shim as BOOTX64.EFI, plus grubx64 and
