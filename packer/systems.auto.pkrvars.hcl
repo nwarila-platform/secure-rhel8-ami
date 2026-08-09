@@ -72,26 +72,27 @@ packer_image = {
   ami_users       = []
   ami_org_arns    = []
   tags = {
-    Name       = "secure-rhel8"
-    OSFamily   = "linux"
-    OSName     = "rhel"
-    OSVersion  = "8"
-    Hardening  = "stig-cis"
-    ManagedBy  = "aws-packer-framework"
-    Repository = "nwarila-platform/secure-rhel8-ami"
+    Name         = "secure-rhel8"
+    ImageFamily  = "rhel"
+    Hardening    = "stig-cis"
+    ManagedBy    = "aws-packer-framework"
+    Repository   = "nwarila-platform/secure-rhel8-ami"
+    RepositoryId = "1326894519"
   }
-  # The nwarila:management:repository-id tag is the IAM identity boundary: the build role's
+  # The RepositoryId tag is the IAM identity boundary: the build role's
   # RunInstances grant requires it at launch and its lifecycle grants are gated on it (see
   # docs/reference/aws-iam/). Removing it fails the build closed.
   run_tags = {
-    Name                               = "packer-build-secure-rhel8"
-    ManagedBy                          = "aws-packer-framework"
-    "nwarila:management:repository-id" = "1326894519"
+    Name         = "packer-build-secure-rhel8"
+    ManagedBy    = "aws-packer-framework"
+    Repository   = "nwarila-platform/secure-rhel8-ami"
+    RepositoryId = "1326894519"
   }
   snapshot_tags = {
-    Name                               = "secure-rhel8"
-    ManagedBy                          = "aws-packer-framework"
-    "nwarila:management:repository-id" = "1326894519"
+    Name         = "secure-rhel8"
+    ManagedBy    = "aws-packer-framework"
+    Repository   = "nwarila-platform/secure-rhel8-ami"
+    RepositoryId = "1326894519"
   }
 
   # Build Instance
