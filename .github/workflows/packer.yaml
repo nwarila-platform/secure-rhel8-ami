@@ -212,11 +212,41 @@ jobs:
           import sys
 
           matches = json.load(open("evidence/vulnerabilities.json"))["matches"]
-          counts = collections.Counter(m["vulnerability"]["severity"] for m in matches)
-          order = ["Critical", "High", "Medium", "Low", "Negligible", "Unknown"]
+
+          # An SBOM carrying no distro identity matches nothing at all, so a clean report is
+          # indistinguishable from a broken scanner. Assert Red Hat advisory data was
+          # actually consulted before believing any number below.
+          namespaces = {m["vulnerability"]["namespace"] for m in matches}
+          if not any(n.startswith("redhat") for n in namespaces):
+              sys.exit(f"Scan produced no Red Hat advisory matches; namespaces seen: {namespaces}")
+
+          # Fixable = Red Hat published a patched build this image does not have, so a
+          # rebuild resolves it. The rest are tracked-but-unfixed upstream and cannot be.
+          fixable = [m for m in matches
+                     if m["vulnerability"].get("fix", {}).get("state") == "fixed"]
+          fix_counts = collections.Counter(m["vulnerability"]["severity"] for m in fixable)
+          all_counts = collections.Counter(m["vulnerability"]["severity"] for m in matches)
+          worst = sorted({(m["vulnerability"]["id"], m["artifact"]["name"],
+                           m["vulnerability"]["severity"])
+                          for m in fixable
+                          if m["vulnerability"]["severity"] in ("Critical", "High")})[:10]
+
           with open(sys.argv[1], "a") as handle:
               handle.write("## Vulnerability summary\n\n")
-              handle.write(" | ".join(f"{s}: {counts.get(s, 0)}" for s in order) + "\n")
+              handle.write("| Severity | Fixable (patch available) | All tracked |\n")
+              handle.write("|---|---:|---:|\n")
+              for severity in ["Critical", "High", "Medium", "Low", "Negligible", "Unknown"]:
+                  if all_counts.get(severity):
+                      handle.write(
+                          f"| {severity} | {fix_counts.get(severity, 0)} "
+                          f"| {all_counts[severity]} |\n"
+                      )
+              unique = len({m["vulnerability"]["id"] for m in fixable})
+              handle.write(f"\n**{unique} unique fixable CVEs.**\n")
+              if worst:
+                  handle.write("\nTop fixable Critical/High:\n\n")
+                  for cve, package, severity in worst:
+                      handle.write(f"- `{cve}` {severity} - {package}\n")
           PY
 
       - name: SBOM Gate and Image Stamp
