@@ -110,6 +110,36 @@
   become: true
   vars:
     sysimage: /mnt/sysimage
+
+    # Packages the published image has no use for. Each was checked against the built rpmdb
+    # for dependents before being listed, and dnf removes those dependents with it - naming
+    # subscription-manager is what takes insights-client, rhc, and
+    # redhat-cloud-client-configuration with it. rh-amazon-rhui-client requires none of them
+    # (only dnf, python3-requests, and amazon-libdnf-plugin), so package installation on a
+    # deployed host is unaffected.
+    rhel8_image_strip_packages:
+      # ~1GB of firmware blobs for physical hardware no instance has. Nothing requires it.
+      - linux-firmware
+      # CPU microcode and software RAID: both the hypervisor's concern, not the guest's.
+      - microcode_ctl
+      - mdadm
+      # Tuning daemon and kernel profiling tools, neither of which a server image needs.
+      - tuned
+      - kernel-tools
+      - kernel-tools-libs
+      # Red Hat SaaS registration and telemetry. Each is a network-talking service in an
+      # image meant to be inert until Ansible configures it.
+      - subscription-manager
+      - dnf-plugin-subscription-manager
+      # Link aggregation and a curses network UI.
+      - NetworkManager-team
+      - NetworkManager-tui
+      # Manual page infrastructure, alongside the documentation removed below.
+      - man-db
+      # Needed to ASSEMBLE this image, never to run it. rsync in particular has no business
+      # in a baseline: it is a capable network transfer tool sitting in every instance.
+      - rsync
+      - parted
   tasks:
     - name: Install imaging tooling (also lands in the image, which needs lvm2 to boot)
       ansible.builtin.shell: |
@@ -234,7 +264,7 @@
           LABEL=ROOTFS    /               ext4  defaults                            1 1
           LABEL=BOOTFS    /boot           ext4  defaults,nodev,nosuid               1 2
           LABEL=EFIFS     /boot/efi       vfat  umask=0077,shortname=winnt,nodev,nosuid 0 2
-          LABEL=HOMEFS    /home           ext4  defaults,nodev,nosuid        1 2
+          LABEL=HOMEFS    /home           ext4  defaults,nodev,noexec,nosuid 1 2
           LABEL=OPTFS     /opt            ext4  defaults,nodev               1 2
           LABEL=TMPFS     /tmp            ext4  defaults,nodev,noexec,nosuid 1 2
           LABEL=VARFS     /var            ext4  defaults,nodev               1 2
@@ -242,6 +272,11 @@
           LABEL=VARLOGFS  /var/log        ext4  defaults,nodev,noexec,nosuid 1 2
           LABEL=AUDITFS   /var/log/audit  ext4  defaults,nodev,noexec,nosuid 1 2
           LABEL=SWAPFS    none            swap  defaults                     0 0
+          # systemd mounts /dev/shm itself, with defaults, before anything reads this file.
+          # Naming it here is what gets the restrictive options applied: shared memory is
+          # world-writable, so without them it is an executable, device-capable directory
+          # every account can write to.
+          tmpfs           /dev/shm        tmpfs defaults,nodev,noexec,nosuid 0 0
 
     - name: Install bootloader and regenerate initramfs for the LVM root
       ansible.builtin.shell: |
@@ -260,6 +295,42 @@
         # exactly one kernel.
         chroot {{ sysimage }} dnf -y remove --oldinstallonly \
           --setopt installonly_limit=1 --setopt protect_running_kernel=false
+
+        # Strip the image to what a server actually runs. Every package here either drives
+        # hardware no instance has, phones a vendor, or was needed only to assemble this
+        # volume - and unlike configuration, nothing about it can be recovered later: an
+        # image that ships a gigabyte of firmware pays for it in every snapshot and every
+        # launch, forever, and removing it after deployment shrinks neither.
+        #
+        # Order matters: this runs after the root has been copied in and before dracut, so
+        # the initramfs is built against the package set that actually ships.
+        # Removed one at a time and only when present: dnf fails the whole transaction on an
+        # unknown name, and a blanket "|| true" would hide a removal that failed for a real
+        # reason. Dependents come out with their dependency, which is why the subscription
+        # and telemetry packages need only their root named here.
+        for package in {{ rhel8_image_strip_packages | join(' ') }}; do
+          if chroot {{ sysimage }} rpm -q "${package}" >/dev/null 2>&1; then
+            chroot {{ sysimage }} dnf -y remove "${package}"
+          fi
+        done
+
+        # Locales other than the one the platform standardises on: roughly 100MB of
+        # translations for a machine with no interactive users.
+        chroot {{ sysimage }} sh -c \
+          'rpm -qa "glibc-langpack-*" | grep -vx "glibc-langpack-en-.*" | xargs -r dnf -y remove'
+
+        # Keep it minimal on the way out too: without these, the first dnf install on a
+        # deployed host quietly reintroduces the weak dependencies and documentation this
+        # step just removed.
+        chroot {{ sysimage }} sh -c \
+          'grep -q "^install_weak_deps" /etc/dnf/dnf.conf || echo install_weak_deps=False >> /etc/dnf/dnf.conf'
+        chroot {{ sysimage }} sh -c \
+          'grep -q "^tsflags" /etc/dnf/dnf.conf || echo tsflags=nodocs >> /etc/dnf/dnf.conf'
+
+        # Documentation already on disk, and the package metadata cache, which is stale the
+        # moment the image is published.
+        rm -rf {{ sysimage }}/usr/share/doc/* {{ sysimage }}/usr/share/man/* \
+               {{ sysimage }}/usr/share/info/* {{ sysimage }}/var/cache/dnf/*
 
         existing_args="$(sed -n 's/^GRUB_CMDLINE_LINUX="\(.*\)"$/\1/p' {{ sysimage }}/etc/default/grub)"
         kernel_args="root=/dev/mapper/sysvg-lv_root ro rd.lvm.lv=sysvg/lv_root ${existing_args}"
