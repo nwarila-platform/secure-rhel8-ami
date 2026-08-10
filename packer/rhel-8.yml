@@ -261,8 +261,13 @@
         chroot {{ sysimage }} rpm -qa --qf "%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\n" \
           | sort > /tmp/evidence/rpm-manifest.tsv
 
-        # The rpm database, for SPDX SBOM generation on the runner (syft reads it).
-        tar -C {{ sysimage }} -czf /tmp/evidence/rpmdb.tar.gz var/lib/rpm
+        # The rpm database plus the distro identity files, for SPDX SBOM generation on the
+        # runner. The identity files are not optional: without them syft cannot tell which
+        # distribution the packages came from, emits bare CPEs instead of
+        # pkg:rpm/redhat/...?distro=rhel-8.10 purls, and grype then has no Red Hat advisory
+        # data to match - reporting zero vulnerabilities for any image, however old.
+        tar -C {{ sysimage }} -czf /tmp/evidence/rpmdb.tar.gz \
+          var/lib/rpm etc/os-release etc/redhat-release etc/system-release
 
         # OpenSCAP STIG evaluation of the assembled tree. Report-only until the hardening
         # roles land: oscap exits 2 when rules fail, which is expected and tolerated; any
