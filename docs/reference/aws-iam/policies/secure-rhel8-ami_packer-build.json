@@ -277,6 +277,17 @@
       }
     },
     {
+      "Sid": "DeregisterOnlyOurImages",
+      "Effect": "Allow",
+      "Action": "ec2:DeregisterImage",
+      "Resource": "arn:aws:ec2:<region>::image/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
+        }
+      }
+    },
+    {
       "Sid": "RetagOurTaggedSnapshots",
       "Effect": "Allow",
       "Action": "ec2:CreateTags",

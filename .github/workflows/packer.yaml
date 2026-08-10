@@ -171,6 +171,145 @@ jobs:
           packer build -timestamp-ui -color=false \
             -only=amazon-ebssurrogate.packer_image . | tee packer-build.log
 
+      - name: Generate SBOM and Vulnerability Report
+        working-directory: ${{ github.workspace }}/aws-packer-framework/packer
+        env:
+          SYFT_VERSION: v1.50.0
+          SYFT_INSTALL_REF: 16223e6dd7893fe578787658ceb876257483d404
+          GRYPE_VERSION: v0.116.1
+          GRYPE_INSTALL_REF: 30394f177175da63ae36b35cdd809c248eb4de7f
+        run: |
+          set -euo pipefail
+
+          test -f evidence/rpm-manifest.tsv
+
+          # Unpack the image rpm database for the SPDX cataloger.
+          mkdir -p evidence/rpmdb-root
+          tar -xzf evidence/rpmdb.tar.gz -C evidence/rpmdb-root
+
+          # Anchore installers pinned by release commit; each installer verifies the
+          # published checksums of the binary it downloads.
+          mkdir -p /tmp/tools
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 2 --retry-connrefused --connect-timeout 15 \
+            "https://raw.githubusercontent.com/anchore/syft/${SYFT_INSTALL_REF}/install.sh" \
+            | sh -s -- -b /tmp/tools "${SYFT_VERSION}"
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 2 --retry-connrefused --connect-timeout 15 \
+            "https://raw.githubusercontent.com/anchore/grype/${GRYPE_INSTALL_REF}/install.sh" \
+            | sh -s -- -b /tmp/tools "${GRYPE_VERSION}"
+
+          /tmp/tools/syft scan dir:evidence/rpmdb-root \
+            -o spdx-json=evidence/sbom.spdx.json \
+            -o table=evidence/sbom-table.txt
+
+          /tmp/tools/grype sbom:evidence/sbom.spdx.json -o json > evidence/vulnerabilities.json
+          /tmp/tools/grype sbom:evidence/sbom.spdx.json -o table > evidence/vulnerabilities.txt
+
+          python3 - "${GITHUB_STEP_SUMMARY}" <<'PY'
+          import collections
+          import json
+          import sys
+
+          matches = json.load(open("evidence/vulnerabilities.json"))["matches"]
+          counts = collections.Counter(m["vulnerability"]["severity"] for m in matches)
+          order = ["Critical", "High", "Medium", "Low", "Negligible", "Unknown"]
+          with open(sys.argv[1], "a") as handle:
+              handle.write("## Vulnerability summary\n\n")
+              handle.write(" | ".join(f"{s}: {counts.get(s, 0)}" for s in order) + "\n")
+          PY
+
+      - name: SBOM Gate and Image Stamp
+        working-directory: ${{ github.workspace }}/aws-packer-framework/packer
+        env:
+          IMAGE_FAMILY: rhel
+          VERSION_SLOTS: "8.10"
+        run: |
+          set -euo pipefail
+
+          # Candidate AMI from the packer manifest; upstream source AMI from the log.
+          ami_id="$(python3 - <<'PY'
+          import glob
+          import json
+
+          path = sorted(glob.glob("manifests/*.json"))[-1]
+          manifest = json.load(open(path))
+          builds = [b for b in manifest["builds"] if b["packer_run_uuid"] == manifest["last_run_uuid"]]
+          print(builds[-1]["artifact_id"].split(":")[1])
+          PY
+          )"
+          source_ami="$(grep -m1 -oE 'Found Image ID: ami-[0-9a-f]+' packer-build.log | grep -oE 'ami-[0-9a-f]+')"
+
+          # change-key = built truth (package set) + every input that shapes the image
+          # invisibly to rpm: upstream source AMI, consumer packer tree, framework and
+          # ansible-framework checkouts. Tree hash, not commit SHA: docs-only commits
+          # must not mint a new image.
+          manifest_sha="$(sha256sum evidence/rpm-manifest.tsv | cut -d ' ' -f 1)"
+          consumer_tree="$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD:packer)"
+          framework_sha="$(git -C "${GITHUB_WORKSPACE}/aws-packer-framework" rev-parse HEAD)"
+          ansible_sha="$(git -C "${GITHUB_WORKSPACE}/ansible-framework" rev-parse HEAD)"
+          change_key="$(printf '%s\n' "${manifest_sha}" "${source_ami}" "${consumer_tree}" "${framework_sha}" "${ansible_sha}" | sha256sum | cut -d ' ' -f 1)"
+
+          aws ec2 describe-images --owners self \
+            --filters "Name=tag:ImageFamily,Values=${IMAGE_FAMILY}" "Name=state,Values=available" \
+            --output json > /tmp/family-images.json
+          previous_key="$(python3 - "${ami_id}" /tmp/family-images.json <<'PY'
+          import json
+          import sys
+
+          images = json.load(open(sys.argv[2]))["Images"]
+          previous = sorted(
+              (i for i in images if i["ImageId"] != sys.argv[1]),
+              key=lambda i: i["CreationDate"],
+          )
+          key = ""
+          if previous:
+              tags = {t["Key"]: t["Value"] for t in previous[-1].get("Tags", [])}
+              key = tags.get("ImageChangeKey", "")
+          print(key)
+          PY
+          )"
+
+          snapshot_ids="$(aws ec2 describe-images --image-ids "${ami_id}" \
+            --query 'Images[0].BlockDeviceMappings[].Ebs.SnapshotId' --output text)"
+
+          if [ -n "${previous_key}" ] && [ "${previous_key}" = "${change_key}" ]; then
+            # Nothing changed: reap the candidate so identical images are never
+            # republished and consumers never rebuild for zero value.
+            aws ec2 deregister-image --image-id "${ami_id}"
+            for snapshot_id in ${snapshot_ids}; do
+              aws ec2 delete-snapshot --snapshot-id "${snapshot_id}"
+            done
+            {
+              echo "## SBOM gate: no change"
+              echo ""
+              echo "Candidate \`${ami_id}\` matched change-key \`${change_key}\` of the"
+              echo "current image. Candidate and snapshots reaped; nothing published."
+            } >> "${GITHUB_STEP_SUMMARY}"
+          else
+            image_version="${VERSION_SLOTS}.$(date -u +%Y%m%d)"
+            commit_sha="$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD)"
+            aws ec2 create-tags --resources "${ami_id}" ${snapshot_ids} --tags \
+              "Key=ImageChangeKey,Value=${change_key}" \
+              "Key=ImageVersion,Value=${image_version}" \
+              "Key=CommitSha,Value=${commit_sha}" \
+              "Key=RunId,Value=${GITHUB_RUN_ID}"
+            {
+              echo "## SBOM gate: change detected, image published"
+              echo ""
+              echo "- AMI: \`${ami_id}\` (ImageVersion \`${image_version}\`)"
+              echo "- change-key: \`${change_key}\` (previous: \`${previous_key:-none}\`)"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload Build Evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-evidence
+          path: ${{ github.workspace }}/aws-packer-framework/packer/evidence
+          if-no-files-found: warn
+
       - name: Upload Packer Build Diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -251,6 +251,44 @@
         touch {{ sysimage }}/.autorelabel
       changed_when: true
 
+    - name: Generate build evidence from the assembled image
+      ansible.builtin.shell: |
+        set -euo pipefail
+        mkdir -p /tmp/evidence
+
+        # Canonical package manifest and the SBOM gate input: sorted NEVRA lines with no
+        # headers, so byte-identical package sets hash identically across builds.
+        chroot {{ sysimage }} rpm -qa --qf "%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\n" \
+          | sort > /tmp/evidence/rpm-manifest.tsv
+
+        # The rpm database, for SPDX SBOM generation on the runner (syft reads it).
+        tar -C {{ sysimage }} -czf /tmp/evidence/rpmdb.tar.gz var/lib/rpm
+
+        # OpenSCAP STIG evaluation of the assembled tree. Report-only until the hardening
+        # roles land: oscap exits 2 when rules fail, which is expected and tolerated; any
+        # other nonzero exit still fails the build. (No apostrophes in this block:
+        # ansible free-form arg splitting.)
+        dnf install -y openscap-scanner scap-security-guide
+        rc=0
+        oscap-chroot {{ sysimage }} xccdf eval \
+          --profile xccdf_org.ssgproject.content_profile_stig \
+          --results-arf /tmp/evidence/oscap-arf.xml \
+          --report /tmp/evidence/oscap-report.html \
+          /usr/share/xml/scap/ssg/content/ssg-rhel8-ds.xml || rc=$?
+        if [ "${rc}" -ne 0 ] && [ "${rc}" -ne 2 ]; then exit "${rc}"; fi
+      changed_when: true
+
+    - name: Fetch build evidence to the workflow runner
+      ansible.builtin.fetch:
+        src: "/tmp/evidence/{{ item }}"
+        dest: "{{ playbook_dir }}/evidence/{{ item }}"
+        flat: true
+      loop:
+        - rpm-manifest.tsv
+        - rpmdb.tar.gz
+        - oscap-arf.xml
+        - oscap-report.html
+
     - name: Scrub identity state and detach the assembled volume
       ansible.builtin.shell: |
         set -euo pipefail
