@@ -136,6 +136,20 @@ while IFS= read -r document; do
         || { printf 'check-iam-literals: %s is not valid JSON.\n' "${document}" >&2; status=1; }
 done < <(find "${IAM_DIR}" -type f -name '*.json')
 
+# Under the deny-all gitignore every new document needs its own allowlist line, so one added
+# without that line stays untracked: it applies fine from a workstation, is absent from the CI
+# checkout, and the apply fails there with a missing-file error that says nothing about why.
+# Fail here instead, where the message can name the cause.
+if git -C "${REPO_ROOT}" rev-parse --git-dir >/dev/null 2>&1; then
+    while IFS= read -r document; do
+        git -C "${REPO_ROOT}" ls-files --error-unmatch "${document}" >/dev/null 2>&1 || {
+            printf 'check-iam-literals: %s is untracked — add its allowlist line to .gitignore.\n' \
+                "${document#"${REPO_ROOT}/"}" >&2
+            status=1
+        }
+    done < <(find "${IAM_DIR}" -type f -name '*.json')
+fi
+
 if ! grep -RIq --binary-files=without-match -F "${THIS_REPO}" "${APPLY_DIRS[@]}"; then
     printf 'check-iam-literals: no document names %s — a wholesale sibling copy would look exactly like this.\n' "${THIS_REPO}" >&2
     status=1

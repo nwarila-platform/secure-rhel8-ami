@@ -1,0 +1,71 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RunImageLegOurs",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:<region>::image/ami-*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
+        }
+      }
+    },
+    {
+      "Sid": "ReadOurConsoleOutput",
+      "Effect": "Allow",
+      "Action": "ec2:GetConsoleOutput",
+      "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
+        }
+      }
+    },
+    {
+      "Sid": "SnapshotDeleteOnlyOurs",
+      "Effect": "Allow",
+      "Action": "ec2:DeleteSnapshot",
+      "Resource": "arn:aws:ec2:<region>::snapshot/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
+        }
+      }
+    },
+    {
+      "Sid": "TagOurRegisteredImages",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "arn:aws:ec2:<region>::image/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceAccount": "<account-id>"
+        }
+      }
+    },
+    {
+      "Sid": "DeregisterOnlyOurImages",
+      "Effect": "Allow",
+      "Action": "ec2:DeregisterImage",
+      "Resource": "arn:aws:ec2:<region>::image/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
+        }
+      }
+    },
+    {
+      "Sid": "RetagOurTaggedSnapshots",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "arn:aws:ec2:<region>::snapshot/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/RepositoryId": "<repository-id>"
+        }
+      }
+    }
+  ]
+}
