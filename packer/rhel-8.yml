@@ -127,10 +127,15 @@
       - tuned
       - kernel-tools
       - kernel-tools-libs
-      # Red Hat SaaS registration and telemetry. Each is a network-talking service in an
-      # image meant to be inert until Ansible configures it.
-      - subscription-manager
+      # Red Hat SaaS registration and telemetry, a network-talking cluster in an image meant
+      # to be inert until Ansible configures it. The PLUGIN is named first and the ordering
+      # is load-bearing: subscription-manager REQUIRES dnf-plugin-subscription-manager, not
+      # the other way round, so removing the former first strands the latter with its python
+      # module gone - and every subsequent dnf call then exits non-zero on plugin load.
+      # Removing the plugin takes subscription-manager, insights-client, rhc and
+      # redhat-cloud-client-configuration with it in one transaction.
       - dnf-plugin-subscription-manager
+      - subscription-manager
       # Link aggregation and a curses network UI.
       - NetworkManager-team
       - NetworkManager-tui
@@ -252,6 +257,13 @@
           if rpm -q "${package}" >/dev/null 2>&1; then
             dnf -y remove "${package}"
           fi
+        done
+
+        # A plugin config left behind by any of the above would make every later dnf call
+        # fail on a module it can no longer import, so clear the ones whose code is gone.
+        for plugin in product-id subscription-manager upload-profile; do
+          python3 -c "import ${plugin//-/_}" 2>/dev/null \
+            || rm -f "/etc/dnf/plugins/${plugin}.conf"
         done
 
         # Locales other than the one the platform standardises on: roughly 100MB of
