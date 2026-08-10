@@ -62,6 +62,26 @@
   gather_facts: false
   become: false
   tasks:
+    # The published image baselines on the newest packages Red Hat offers, not on whatever
+    # the source AMI froze at GA. Without this the image ships with every erratum released
+    # since that snapshot still outstanding - the first scan of an unpatched build found 24
+    # CVEs with a published fix. Patching before the bootstrap role means it configures
+    # services at the versions the image will actually run.
+    #
+    # Everything this changes is copied into the image by the assembly play, so a new kernel
+    # arriving here is expected; that play regenerates an initramfs for every installed
+    # kernel and pins the default entry to the newest.
+    - name: Baseline the image on the latest available packages
+      ansible.builtin.dnf:
+        name: '*'
+        state: latest
+        update_cache: true
+      become: true
+      register: patch_baseline
+      retries: 2
+      delay: 15
+      until: patch_baseline is succeeded
+
     - name: Bootstrap this host
       ansible.builtin.include_role:
         name: 'os_bootstrap'
@@ -76,7 +96,8 @@
     - name: Install imaging tooling (also lands in the image, which needs lvm2 to boot)
       ansible.builtin.shell: |
         set -euo pipefail
-        dnf install -y lvm2 parted e2fsprogs rsync dosfstools grub2-efi-x64 shim-x64 efibootmgr
+        dnf install -y lvm2 parted e2fsprogs rsync dosfstools grub2-efi-x64 shim-x64 \
+          efibootmgr grubby
       changed_when: true
 
     - name: Resolve the blank surrogate disk (the only unmounted, unpartitioned disk)
@@ -222,9 +243,21 @@
         mount -t efivarfs efivarfs {{ sysimage }}/sys/firmware/efi/efivars 2>/dev/null || true
         chroot {{ sysimage }} dnf reinstall -y grub2-efi-x64 shim-x64 || \
           chroot {{ sysimage }} dnf install -y grub2-efi-x64 shim-x64
-        kver="$(chroot {{ sysimage }} sh -c 'ls /lib/modules' | sort -V | tail -1)"
-        chroot {{ sysimage }} dracut -f --add lvm "/boot/initramfs-${kver}.img" "${kver}"
+        # Patching installs a new kernel beside the old one, and the root filesystem is an LV,
+        # so every kernel that can be selected needs an initramfs carrying the LVM module -
+        # not just the newest. A kernel left with the source AMI initramfs cannot find the
+        # root volume and halts in the initramfs shell.
+        for kver in $(chroot {{ sysimage }} sh -c 'ls /lib/modules'); do
+          chroot {{ sysimage }} dracut -f --add lvm "/boot/initramfs-${kver}.img" "${kver}"
+        done
+
+        newest_kver="$(chroot {{ sysimage }} sh -c 'ls /lib/modules' | sort -V | tail -1)"
         chroot {{ sysimage }} grub2-mkconfig -o /boot/efi/EFI/redhat/grub.cfg
+
+        # The saved default is inherited from the build instance, which is still running the
+        # pre-patch kernel, so without this the patched image would boot the older one it
+        # shipped alongside. Pin it to the newest installed kernel explicitly.
+        chroot {{ sysimage }} grubby --set-default "/boot/vmlinuz-${newest_kver}"
         chroot {{ sysimage }} grub2-editenv /boot/efi/EFI/redhat/grubenv set kernelopts="${kernel_args}"
 
         # The BLS entries were copied from the source image, where /boot lives on the root
