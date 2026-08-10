@@ -112,19 +112,22 @@ done
 BUILD_ROLE="github_${OWNER}_${REPO}"
 ADMIN_ROLE="github_${OWNER}_${REPO}-admin"
 BUILD_POLICY="${REPO}_packer-build"
+PUBLISH_POLICY="${REPO}_packer-publish"
 BOUNDARY_POLICY="${REPO}_boundary"
 MANAGE_POLICY="${REPO}_iam-manage"
 ADMIN_POLICY="${REPO}_iam-admin"
 BOUNDARY_ARN="arn:aws:iam::${ACCOUNT}:policy/${BOUNDARY_POLICY}"
 
 if [ "${TIER}" = 'repo' ]; then
-    POLICIES=("${BUILD_POLICY}")
+    POLICIES=("${BUILD_POLICY}" "${PUBLISH_POLICY}")
     ROLE_PAIRS=("${BUILD_ROLE}:${BUILD_ROLE}.trust.json")
-    ATTACHMENTS=("${BUILD_ROLE}:${BUILD_POLICY}" "${BUILD_ROLE}:${MANAGE_POLICY}")
+    ATTACHMENTS=("${BUILD_ROLE}:${BUILD_POLICY}" "${BUILD_ROLE}:${PUBLISH_POLICY}" \
+                 "${BUILD_ROLE}:${MANAGE_POLICY}")
 else
     POLICIES=("${BOUNDARY_POLICY}" "${MANAGE_POLICY}" "${ADMIN_POLICY}")
     ROLE_PAIRS=("${ADMIN_ROLE}:${ADMIN_ROLE}.trust.json")
-    ATTACHMENTS=("${ADMIN_ROLE}:${BUILD_POLICY}" "${ADMIN_ROLE}:${ADMIN_POLICY}")
+    ATTACHMENTS=("${ADMIN_ROLE}:${BUILD_POLICY}" "${ADMIN_ROLE}:${PUBLISH_POLICY}" \
+                 "${ADMIN_ROLE}:${ADMIN_POLICY}")
 fi
 
 exists_policy() { aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT}:policy/$1" "${AWSARGS[@]}" >/dev/null 2>&1; }
