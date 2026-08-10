@@ -266,9 +266,16 @@
             || rm -f "/etc/dnf/plugins/${plugin}.conf"
         done
 
-        # Locales other than the one the platform standardises on: roughly 100MB of
-        # translations for a machine with no interactive users.
-        rpm -qa 'glibc-langpack-*' | grep -v '^glibc-langpack-en-' | xargs -r dnf -y remove
+        # Locales other than the one the platform standardises on. This base image ships
+        # only glibc-langpack-en, so it is normally a no-op and is kept for a base that
+        # ships more. Captured into a variable rather than piped straight into removal:
+        # under pipefail a grep that matches nothing returns 1 and fails the whole task,
+        # with no stderr to explain why - which is exactly how it failed once already.
+        langpacks="$(rpm -qa 'glibc-langpack-*' | grep -v '^glibc-langpack-en-' || true)"
+        if [ -n "${langpacks}" ]; then
+          # shellcheck disable=SC2086
+          dnf -y remove ${langpacks}
+        fi
 
         # Keep it minimal on the way out too: without these, the first dnf install on a
         # deployed host quietly reintroduces the weak dependencies and documentation this
