@@ -377,7 +377,7 @@
           ! -name "*${newest_kver}*" ! -name '*rescue*' -delete
       changed_when: true
 
-    - name: Install bootloader and regenerate initramfs for the LVM root
+    - name: Install the signed EFI bootloader into the image ESP
       ansible.builtin.shell: |
         set -euo pipefail
         existing_args="$(sed -n 's/^GRUB_CMDLINE_LINUX="\(.*\)"$/\1/p' {{ sysimage }}/etc/default/grub)"
@@ -388,17 +388,38 @@
         # UEFI install: RHEL ships the signed EFI binaries via grub2-efi-x64 + shim-x64
         # into /boot/efi/EFI/redhat/. grubx64.efi is built with prefix /EFI/redhat, so it
         # reads /boot/efi/EFI/redhat/grub.cfg wherever it is launched from.
-        mount -t efivarfs efivarfs {{ sysimage }}/sys/firmware/efi/efivars 2>/dev/null || true
-        chroot {{ sysimage }} dnf reinstall -y grub2-efi-x64 shim-x64 || \
-          chroot {{ sysimage }} dnf install -y grub2-efi-x64 shim-x64
-        # Patching installs a new kernel beside the old one, and the root filesystem is an LV,
-        # so every kernel that can be selected needs an initramfs carrying the LVM module -
-        # not just the newest. A kernel left with the source AMI initramfs cannot find the
-        # root volume and halts in the initramfs shell.
+        # The ESP was freshly formatted and the copy excluded /boot/efi, so the signed EFI
+        # binaries have to be put back. They are already on this machine: the build instance
+        # installed grub2-efi-x64 and shim-x64 from the same repositories at the same
+        # versions, and its own ESP holds exactly the files the image needs.
+        #
+        # Copying them is deliberate. Reinstalling the packages inside the chroot ran their
+        # scriptlets, and those call efibootmgr against an efivarfs that - because /sys is
+        # bind-mounted from the host - is the BUILD INSTANCE's firmware variables, not the
+        # image's. It also needed the network for no reason. No efivarfs is mounted here at
+        # all now; nothing in this task has any business writing firmware variables.
+        install -d -m 0700 {{ sysimage }}/boot/efi/EFI
+        cp -a /boot/efi/EFI/redhat {{ sysimage }}/boot/efi/EFI/
+      changed_when: true
+
+    # Its own task: dracut is the longest-running command in the finalization and probes the
+    # system it runs on, so when the connection dies the task name is the only evidence left.
+    - name: Regenerate the initramfs for the LVM root
+      ansible.builtin.shell: |
+        set -euo pipefail
+        # The root filesystem is an LV, so every kernel that can be selected needs an
+        # initramfs carrying the LVM module. A kernel left holding the source AMI initramfs
+        # cannot find the root volume and halts in the initramfs shell.
         for kver in $(chroot {{ sysimage }} sh -c 'ls /lib/modules'); do
           chroot {{ sysimage }} dracut -f --add lvm "/boot/initramfs-${kver}.img" "${kver}"
         done
+      changed_when: true
 
+    - name: Generate the boot configuration
+      ansible.builtin.shell: |
+        set -euo pipefail
+        existing_args="$(sed -n 's/^GRUB_CMDLINE_LINUX="\(.*\)"$/\1/p' {{ sysimage }}/etc/default/grub)"
+        kernel_args="root=/dev/mapper/sysvg-lv_root ro rd.lvm.lv=sysvg/lv_root ${existing_args}"
         newest_kver="$(chroot {{ sysimage }} sh -c 'ls /lib/modules' | sort -V | tail -1)"
         chroot {{ sysimage }} grub2-mkconfig -o /boot/efi/EFI/redhat/grub.cfg
 
