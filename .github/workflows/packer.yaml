@@ -248,7 +248,9 @@ jobs:
           consumer_tree="$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD:packer)"
           framework_sha="$(git -C "${GITHUB_WORKSPACE}/aws-packer-framework" rev-parse HEAD)"
           ansible_sha="$(git -C "${GITHUB_WORKSPACE}/ansible-framework" rev-parse HEAD)"
-          change_key="$(printf '%s\n' "${manifest_sha}" "${source_ami}" "${consumer_tree}" "${framework_sha}" "${ansible_sha}" | sha256sum | cut -d ' ' -f 1)"
+          change_key="$(printf '%s\n' \
+            "${manifest_sha}" "${source_ami}" "${consumer_tree}" \
+            "${framework_sha}" "${ansible_sha}" | sha256sum | cut -d ' ' -f 1)"
 
           aws ec2 describe-images --owners self \
             --filters "Name=tag:ImageFamily,Values=${IMAGE_FAMILY}" "Name=state,Values=available" \
