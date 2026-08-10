@@ -293,8 +293,18 @@
         # only: the build instance is still running the old kernel and needs its modules to
         # finish the assembly. This runs before dracut and grub2-mkconfig below, so they see
         # exactly one kernel.
-        chroot {{ sysimage }} dnf -y remove --oldinstallonly \
-          --setopt installonly_limit=1 --setopt protect_running_kernel=false
+        # Not --oldinstallonly: it honours installonly_limit, which dnf refuses to set
+        # below 2, so with exactly two kernels installed it removes nothing. Name the
+        # superseded versions instead. protect_running_kernel is disabled because the
+        # running kernel here belongs to the BUILD INSTANCE, which is still on the
+        # pre-patch one - the check would protect exactly the kernel being removed.
+        newest_kver="$(chroot {{ sysimage }} sh -c 'ls /lib/modules' | sort -V | tail -1)"
+        for kernel_package in kernel kernel-core kernel-modules; do
+          chroot {{ sysimage }} sh -c "rpm -q ${kernel_package} \
+            --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' 2>/dev/null \
+            | grep -v '${newest_kver}' \
+            | xargs -r dnf -y remove --setopt protect_running_kernel=false"
+        done
 
         # Strip the image to what a server actually runs. Every package here either drives
         # hardware no instance has, phones a vendor, or was needed only to assemble this
