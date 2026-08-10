@@ -71,16 +71,33 @@
     # Everything this changes is copied into the image by the assembly play, so a new kernel
     # arriving here is expected; that play regenerates an initramfs for every installed
     # kernel and pins the default entry to the newest.
+    # The transaction restarts NetworkManager and sshd, which drops the SSH session Ansible
+    # is holding: run it synchronously and the play dies UNREACHABLE partway through, with
+    # the target left mid-update. Detaching it puts the transaction outside the session, so
+    # a dropped connection costs a reconnect rather than the build.
     - name: Baseline the image on the latest available packages
       ansible.builtin.dnf:
         name: '*'
         state: latest
         update_cache: true
       become: true
+      async: 2700
+      poll: 0
+      register: patch_job
+
+    - name: Reconnect after the update restarts networking and sshd
+      ansible.builtin.wait_for_connection:
+        delay: 15
+        timeout: 600
+
+    - name: Wait for the package baseline to finish
+      ansible.builtin.async_status:
+        jid: "{{ patch_job.ansible_job_id }}"
+      become: true
       register: patch_baseline
-      retries: 2
-      delay: 15
-      until: patch_baseline is succeeded
+      until: patch_baseline.finished
+      retries: 90
+      delay: 30
 
     - name: Bootstrap this host
       ansible.builtin.include_role:
