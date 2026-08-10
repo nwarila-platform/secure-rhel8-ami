@@ -17,7 +17,7 @@ operator personally assumes through the organization SSO broker.
 
 | Tier | Objects | Applied by | Why |
 |---|---|---|---|
-| repo | `secure-rhel8-ami_packer-build` policy · non-admin role (trust, boundary attachment, policy attachments) | `iam.yml` → `bootstrap-iam.sh --tier repo` via OIDC | Day-to-day IAM changes ride PRs and the workflow |
+| repo | `secure-rhel8-ami_packer-build` and `secure-rhel8-ami_packer-publish` policies · non-admin role (trust, boundary attachment, policy attachments) | `iam.yml` → `bootstrap-iam.sh --tier repo` via OIDC | Day-to-day IAM changes ride PRs and the workflow |
 | operator | `secure-rhel8-ami_boundary` · `secure-rhel8-ami_iam-manage` · `secure-rhel8-ami_iam-admin` · the `-admin` role | `bootstrap-iam.sh --tier operator --profile <sso>` — personally, never from CI | The workflow must never write its own authority |
 
 The anti-escalation chain: the non-admin role's `iam-manage` grant can manage **only** the
@@ -31,7 +31,7 @@ not managed here.
 
 ## Iterative policy derivation
 
-`secure-rhel8-ami_packer-build` is developed **empirically**: it started as a blank baseline
+`secure-rhel8-ami_packer-build` and `secure-rhel8-ami_packer-publish` are developed **empirically**: it started as a blank baseline
 (`sts:GetCallerIdentity` only) and every statement is added in response to an observed
 `UnauthorizedOperation` denial from a real build run — one denial, one commit, one
 `iam.yml apply`, re-run. The commit history of the policy file is the least-privilege
@@ -61,8 +61,8 @@ resources. Substitute it everywhere in one operation.
 
 | Role | Trust source | Policies | Boundary | Purpose |
 |---|---|---|---|---|
-| `github_nwarila-platform_secure-rhel8-ami` | `roles/github_nwarila-platform_secure-rhel8-ami.trust.json` | `secure-rhel8-ami_packer-build` · `secure-rhel8-ami_iam-manage` | `secure-rhel8-ami_boundary` | GitHub-assumed: Packer builds (`packer.yaml`) and repo-tier IAM reconciliation (`iam.yml`) |
-| `github_nwarila-platform_secure-rhel8-ami-admin` | `roles/github_nwarila-platform_secure-rhel8-ami-admin.trust.json` | `secure-rhel8-ami_packer-build` · `secure-rhel8-ami_iam-admin` | — (operator trust level) | Personally assumed via the SSO broker: local builds, break-glass, and governance-tier applies |
+| `github_nwarila-platform_secure-rhel8-ami` | `roles/github_nwarila-platform_secure-rhel8-ami.trust.json` | `secure-rhel8-ami_packer-build` · `secure-rhel8-ami_packer-publish` · `secure-rhel8-ami_iam-manage` | `secure-rhel8-ami_boundary` | GitHub-assumed: Packer builds (`packer.yaml`) and repo-tier IAM reconciliation (`iam.yml`) |
+| `github_nwarila-platform_secure-rhel8-ami-admin` | `roles/github_nwarila-platform_secure-rhel8-ami-admin.trust.json` | `secure-rhel8-ami_packer-build` · `secure-rhel8-ami_packer-publish` · `secure-rhel8-ami_iam-admin` | — (operator trust level) | Personally assumed via the SSO broker: local builds, break-glass, and governance-tier applies |
 
 The non-admin trust is bounded to this repository's immutable `repository_id`, both OIDC
 subject forms (plain and ID-embedded — see the windows-wsus reference for the
