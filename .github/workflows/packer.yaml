@@ -254,6 +254,10 @@ jobs:
         env:
           IMAGE_FAMILY: rhel
           VERSION_SLOTS: "8.10"
+          # Matches the RepositoryId stamped by the Packer inventory; it is what bounds every
+          # tag-conditioned grant in the build policy, so snapshot cleanup can only ever
+          # reach resources this repository created.
+          REPOSITORY_ID: "1326894519"
         run: |
           set -euo pipefail
 
@@ -333,6 +337,24 @@ jobs:
               echo "- change-key: \`${change_key}\` (previous: \`${previous_key:-none}\`)"
             } >> "${GITHUB_STEP_SUMMARY}"
           fi
+
+          # The surrogate builder snapshots the assembled volume twice but RegisterImage
+          # references only one, so every build leaves the other behind. Deleting by AMI
+          # reference alone therefore never reaches it, and the strays accumulate for the
+          # life of the account. Delete every snapshot this repository owns that no image
+          # references - which also covers the reaped candidate half.
+          aws ec2 describe-snapshots --owner-ids self \
+            --filters "Name=tag:RepositoryId,Values=${REPOSITORY_ID}" \
+            --query 'Snapshots[].SnapshotId' --output text | tr '\t' '\n' > /tmp/owned-snapshots
+          aws ec2 describe-images --owners self \
+            --query 'Images[].BlockDeviceMappings[].Ebs.SnapshotId' --output text \
+            | tr '\t' '\n' | sort -u > /tmp/referenced-snapshots
+          orphans="$(comm -23 <(sort -u /tmp/owned-snapshots) /tmp/referenced-snapshots)"
+          for snapshot_id in ${orphans}; do
+            [ -n "${snapshot_id}" ] || continue
+            aws ec2 delete-snapshot --snapshot-id "${snapshot_id}" \
+              && echo "reaped unreferenced snapshot ${snapshot_id}"
+          done
 
       - name: Upload Build Evidence
         if: always()
