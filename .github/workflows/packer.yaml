@@ -270,14 +270,14 @@ jobs:
           PY
           )"
 
-          snapshot_ids="$(aws ec2 describe-images --image-ids "${ami_id}" \
-            --query 'Images[0].BlockDeviceMappings[].Ebs.SnapshotId' --output text)"
+          mapfile -t snapshot_ids < <(aws ec2 describe-images --image-ids "${ami_id}" \
+            --query 'Images[0].BlockDeviceMappings[].Ebs.SnapshotId' --output text | tr '\t' '\n')
 
           if [ -n "${previous_key}" ] && [ "${previous_key}" = "${change_key}" ]; then
             # Nothing changed: reap the candidate so identical images are never
             # republished and consumers never rebuild for zero value.
             aws ec2 deregister-image --image-id "${ami_id}"
-            for snapshot_id in ${snapshot_ids}; do
+            for snapshot_id in "${snapshot_ids[@]}"; do
               aws ec2 delete-snapshot --snapshot-id "${snapshot_id}"
             done
             {
@@ -289,7 +289,7 @@ jobs:
           else
             image_version="${VERSION_SLOTS}.$(date -u +%Y%m%d)"
             commit_sha="$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD)"
-            aws ec2 create-tags --resources "${ami_id}" ${snapshot_ids} --tags \
+            aws ec2 create-tags --resources "${ami_id}" "${snapshot_ids[@]}" --tags \
               "Key=ImageChangeKey,Value=${change_key}" \
               "Key=ImageVersion,Value=${image_version}" \
               "Key=CommitSha,Value=${commit_sha}" \
