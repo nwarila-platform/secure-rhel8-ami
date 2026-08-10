@@ -331,39 +331,55 @@
           # every account can write to.
           tmpfs           /dev/shm        tmpfs defaults,nodev,noexec,nosuid 0 0
 
-    - name: Install bootloader and regenerate initramfs for the LVM root
+    # Split from the bootloader work below so a failure names itself. When this ran as one
+    # task, an UNREACHABLE returned no output at all - the connection carrying it was the
+    # thing that died - and the only way to tell which command was responsible was to keep
+    # moving code out until it stopped happening.
+    - name: Prepare the chroot for image finalization
       ansible.builtin.shell: |
         set -euo pipefail
         mount --rbind /dev  {{ sysimage }}/dev  && mount --make-rslave {{ sysimage }}/dev
         mount --rbind /sys  {{ sysimage }}/sys  && mount --make-rslave {{ sysimage }}/sys
         mount -t proc proc  {{ sysimage }}/proc
+      changed_when: true
 
-        # Kernels are install-only, so the update added the new one beside the old rather
-        # than replacing it. Left in place the image ships a kernel it will never boot,
-        # costing roughly 300MB and making every vulnerability report list the superseded
-        # kernel as unpatched forever - the first patched build reported 11 High CVEs, all
-        # of them fixed in the kernel it actually boots. Remove it from the assembled tree
-        # only: the build instance is still running the old kernel and needs its modules to
-        # finish the assembly. This runs before dracut and grub2-mkconfig below, so they see
-        # exactly one kernel.
-        # Not --oldinstallonly: it honours installonly_limit, which dnf refuses to set
-        # below 2, so with exactly two kernels installed it removes nothing. Name the
-        # superseded versions instead. protect_running_kernel is disabled because the
-        # running kernel here belongs to the BUILD INSTANCE, which is still on the
-        # pre-patch one - the check would protect exactly the kernel being removed.
-        # rsync survived the strip because the copy needed it. rpm -e rather than dnf: no
-        # dependency resolution, no cascade, and the one scriptlet it runs touches nothing
-        # outside the tree. Nothing else in the image requires it.
-        chroot {{ sysimage }} rpm -e rsync || true
+    # rpm -e --noscripts, not dnf. The chroot shares /dev, /sys and /proc with the build
+    # instance, so a package scriptlet that reloads udev or pokes systemd acts on the HOST -
+    # which is how removing these inside the chroot took the build's own SSH session down.
+    # Nothing here needs its scriptlets to run: dracut and grub2-mkconfig below rebuild the
+    # initramfs and boot entries from scratch immediately afterwards, which is exactly what
+    # those scriptlets would have done.
+    #
+    # rsync survived the earlier strip because the copy itself needed it. The superseded
+    # kernel is removed for the reasons in the strip task: 300MB the image never boots, and
+    # a vulnerability report that lists it as unpatched forever.
+    - name: Remove rsync and the superseded kernel from the assembled tree
+      ansible.builtin.shell: |
+        set -euo pipefail
+        chroot {{ sysimage }} rpm -e --noscripts rsync || true
 
         newest_kver="$(chroot {{ sysimage }} sh -c 'ls /lib/modules' | sort -V | tail -1)"
-        for kernel_package in kernel kernel-core kernel-modules; do
-          chroot {{ sysimage }} sh -c "rpm -q ${kernel_package} \
-            --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' 2>/dev/null \
-            | grep -v '${newest_kver}' \
-            | xargs -r dnf -y remove --setopt protect_running_kernel=false"
-        done
+        stale="$(chroot {{ sysimage }} sh -c "rpm -qa 'kernel*' \
+          --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n'" \
+          | grep -E '^kernel(-core|-modules)?-[0-9]' | grep -v "${newest_kver}" || true)"
+        if [ -n "${stale}" ]; then
+          # shellcheck disable=SC2086
+          chroot {{ sysimage }} rpm -e --noscripts ${stale}
+        fi
 
+        # --noscripts leaves the boot entry and generated initramfs behind, because the
+        # scriptlet that would have removed them never ran. Clear them so grub2-mkconfig
+        # cannot offer a kernel whose vmlinuz is gone.
+        find {{ sysimage }}/boot/loader/entries -name '*.conf' -print0 2>/dev/null \
+          | xargs -0 -r grep -L "${newest_kver}" \
+          | xargs -r rm -f
+        find {{ sysimage }}/boot -maxdepth 1 \( -name 'initramfs-*' -o -name 'vmlinuz-*' \) \
+          ! -name "*${newest_kver}*" ! -name '*rescue*' -delete
+      changed_when: true
+
+    - name: Install bootloader and regenerate initramfs for the LVM root
+      ansible.builtin.shell: |
+        set -euo pipefail
         existing_args="$(sed -n 's/^GRUB_CMDLINE_LINUX="\(.*\)"$/\1/p' {{ sysimage }}/etc/default/grub)"
         kernel_args="root=/dev/mapper/sysvg-lv_root ro rd.lvm.lv=sysvg/lv_root ${existing_args}"
         sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"rd.lvm.lv=sysvg/lv_root ${existing_args}\"|" \
