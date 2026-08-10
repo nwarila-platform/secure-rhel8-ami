@@ -136,9 +136,9 @@
       - NetworkManager-tui
       # Manual page infrastructure, alongside the documentation removed below.
       - man-db
-      # Needed to ASSEMBLE this image, never to run it. rsync in particular has no business
-      # in a baseline: it is a capable network transfer tool sitting in every instance.
-      - rsync
+      # Needed to ASSEMBLE this image, never to run it. parted has finished partitioning
+      # by the time the strip runs; rsync is excluded here because the copy still needs it,
+      # and comes out of the assembled tree instead.
       - parted
   tasks:
     - name: Install imaging tooling (also lands in the image, which needs lvm2 to boot)
@@ -236,6 +236,40 @@
         mount /dev/sysvg/lv_var_audit {{ sysimage }}/var/log/audit
       changed_when: true
 
+    # Stripping happens HERE, on the build instance, before the copy - not in the chroot
+    # afterwards. A chroot whose /dev, /sys and /proc are bind-mounted from the host shares
+    # them with it, so a removal scriptlet that reloads udev reaches the BUILD INSTANCE's
+    # devices; the first attempt at this dropped the build's own SSH session mid-transaction
+    # and the run died UNREACHABLE. Removing the packages before the root is copied puts the
+    # same result in the image with none of that reach.
+    #
+    # parted has done its work by now; rsync is still needed for the copy itself and is
+    # removed from the assembled tree afterwards.
+    - name: Strip packages the published image has no use for
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for package in {{ rhel8_image_strip_packages | join(' ') }}; do
+          if rpm -q "${package}" >/dev/null 2>&1; then
+            dnf -y remove "${package}"
+          fi
+        done
+
+        # Locales other than the one the platform standardises on: roughly 100MB of
+        # translations for a machine with no interactive users.
+        rpm -qa 'glibc-langpack-*' | grep -v '^glibc-langpack-en-' | xargs -r dnf -y remove
+
+        # Keep it minimal on the way out too: without these, the first dnf install on a
+        # deployed host quietly reintroduces the weak dependencies and documentation this
+        # step just removed.
+        grep -q '^install_weak_deps' /etc/dnf/dnf.conf \
+          || echo install_weak_deps=False >> /etc/dnf/dnf.conf
+        grep -q '^tsflags' /etc/dnf/dnf.conf || echo tsflags=nodocs >> /etc/dnf/dnf.conf
+
+        # Documentation already on disk, and the package metadata cache, which is stale the
+        # moment the image is published.
+        rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* /var/cache/dnf/*
+      changed_when: true
+
     - name: Copy the configured root into the STIG layout (credential/state excludes)
       ansible.builtin.shell: |
         set -euo pipefail
@@ -298,6 +332,11 @@
         # superseded versions instead. protect_running_kernel is disabled because the
         # running kernel here belongs to the BUILD INSTANCE, which is still on the
         # pre-patch one - the check would protect exactly the kernel being removed.
+        # rsync survived the strip because the copy needed it. rpm -e rather than dnf: no
+        # dependency resolution, no cascade, and the one scriptlet it runs touches nothing
+        # outside the tree. Nothing else in the image requires it.
+        chroot {{ sysimage }} rpm -e rsync || true
+
         newest_kver="$(chroot {{ sysimage }} sh -c 'ls /lib/modules' | sort -V | tail -1)"
         for kernel_package in kernel kernel-core kernel-modules; do
           chroot {{ sysimage }} sh -c "rpm -q ${kernel_package} \
@@ -305,42 +344,6 @@
             | grep -v '${newest_kver}' \
             | xargs -r dnf -y remove --setopt protect_running_kernel=false"
         done
-
-        # Strip the image to what a server actually runs. Every package here either drives
-        # hardware no instance has, phones a vendor, or was needed only to assemble this
-        # volume - and unlike configuration, nothing about it can be recovered later: an
-        # image that ships a gigabyte of firmware pays for it in every snapshot and every
-        # launch, forever, and removing it after deployment shrinks neither.
-        #
-        # Order matters: this runs after the root has been copied in and before dracut, so
-        # the initramfs is built against the package set that actually ships.
-        # Removed one at a time and only when present: dnf fails the whole transaction on an
-        # unknown name, and a blanket "|| true" would hide a removal that failed for a real
-        # reason. Dependents come out with their dependency, which is why the subscription
-        # and telemetry packages need only their root named here.
-        for package in {{ rhel8_image_strip_packages | join(' ') }}; do
-          if chroot {{ sysimage }} rpm -q "${package}" >/dev/null 2>&1; then
-            chroot {{ sysimage }} dnf -y remove "${package}"
-          fi
-        done
-
-        # Locales other than the one the platform standardises on: roughly 100MB of
-        # translations for a machine with no interactive users.
-        chroot {{ sysimage }} sh -c \
-          'rpm -qa "glibc-langpack-*" | grep -vx "glibc-langpack-en-.*" | xargs -r dnf -y remove'
-
-        # Keep it minimal on the way out too: without these, the first dnf install on a
-        # deployed host quietly reintroduces the weak dependencies and documentation this
-        # step just removed.
-        chroot {{ sysimage }} sh -c \
-          'grep -q "^install_weak_deps" /etc/dnf/dnf.conf || echo install_weak_deps=False >> /etc/dnf/dnf.conf'
-        chroot {{ sysimage }} sh -c \
-          'grep -q "^tsflags" /etc/dnf/dnf.conf || echo tsflags=nodocs >> /etc/dnf/dnf.conf'
-
-        # Documentation already on disk, and the package metadata cache, which is stale the
-        # moment the image is published.
-        rm -rf {{ sysimage }}/usr/share/doc/* {{ sysimage }}/usr/share/man/* \
-               {{ sysimage }}/usr/share/info/* {{ sysimage }}/var/cache/dnf/*
 
         existing_args="$(sed -n 's/^GRUB_CMDLINE_LINUX="\(.*\)"$/\1/p' {{ sysimage }}/etc/default/grub)"
         kernel_args="root=/dev/mapper/sysvg-lv_root ro rd.lvm.lv=sysvg/lv_root ${existing_args}"
