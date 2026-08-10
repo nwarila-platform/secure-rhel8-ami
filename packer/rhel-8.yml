@@ -69,8 +69,9 @@
     # services at the versions the image will actually run.
     #
     # Everything this changes is copied into the image by the assembly play, so a new kernel
-    # arriving here is expected; that play regenerates an initramfs for every installed
-    # kernel and pins the default entry to the newest.
+    # arriving here is expected; that play drops the superseded kernel, regenerates the
+    # initramfs, and pins the default entry to what remains.
+    #
     # The transaction restarts NetworkManager and sshd, which drops the SSH session Ansible
     # is holding: run it synchronously and the play dies UNREACHABLE partway through, with
     # the target left mid-update. Detaching it puts the transaction outside the session, so
@@ -248,6 +249,17 @@
         mount --rbind /dev  {{ sysimage }}/dev  && mount --make-rslave {{ sysimage }}/dev
         mount --rbind /sys  {{ sysimage }}/sys  && mount --make-rslave {{ sysimage }}/sys
         mount -t proc proc  {{ sysimage }}/proc
+
+        # Kernels are install-only, so the update added the new one beside the old rather
+        # than replacing it. Left in place the image ships a kernel it will never boot,
+        # costing roughly 300MB and making every vulnerability report list the superseded
+        # kernel as unpatched forever - the first patched build reported 11 High CVEs, all
+        # of them fixed in the kernel it actually boots. Remove it from the assembled tree
+        # only: the build instance is still running the old kernel and needs its modules to
+        # finish the assembly. This runs before dracut and grub2-mkconfig below, so they see
+        # exactly one kernel.
+        chroot {{ sysimage }} dnf -y remove --oldinstallonly \
+          --setopt installonly_limit=1 --setopt protect_running_kernel=false
 
         existing_args="$(sed -n 's/^GRUB_CMDLINE_LINUX="\(.*\)"$/\1/p' {{ sysimage }}/etc/default/grub)"
         kernel_args="root=/dev/mapper/sysvg-lv_root ro rd.lvm.lv=sysvg/lv_root ${existing_args}"
