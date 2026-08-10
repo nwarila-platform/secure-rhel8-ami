@@ -17,7 +17,7 @@
       "Resource": "*"
     },
     {
-      "Sid": "TemporaryKeyPairLifecycle",
+      "Sid": "TempKeyPairLifecycle",
       "Effect": "Allow",
       "Action": [
         "ec2:CreateKeyPair",
@@ -37,19 +37,19 @@
       }
     },
     {
-      "Sid": "TemporarySecurityGroupCreateInPinnedVpc",
+      "Sid": "TempSecGroupCreateInVpc",
       "Effect": "Allow",
       "Action": "ec2:CreateSecurityGroup",
       "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*"
     },
     {
-      "Sid": "TemporarySecurityGroupVpcLeg",
+      "Sid": "TempSecGroupVpcLeg",
       "Effect": "Allow",
       "Action": "ec2:CreateSecurityGroup",
       "Resource": "arn:aws:ec2:<region>:<account-id>:vpc/<vpc-id>"
     },
     {
-      "Sid": "TagSecurityGroupOnCreate",
+      "Sid": "TagSecGroupOnCreate",
       "Effect": "Allow",
       "Action": "ec2:CreateTags",
       "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*",
@@ -60,7 +60,7 @@
       }
     },
     {
-      "Sid": "TemporarySecurityGroupLifecycleOnlyOurs",
+      "Sid": "TempSecGroupLifecycleOurs",
       "Effect": "Allow",
       "Action": [
         "ec2:AuthorizeSecurityGroupIngress",
@@ -77,7 +77,7 @@
       }
     },
     {
-      "Sid": "RunInstancesInstanceLegImdsV2Enforced",
+      "Sid": "RunInstanceLegImdsV2",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
@@ -106,7 +106,7 @@
       }
     },
     {
-      "Sid": "RunInstancesUntaggableLegs",
+      "Sid": "RunUntaggableLegs",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": [
@@ -115,7 +115,7 @@
       ]
     },
     {
-      "Sid": "RunInstancesEniLegSubnetPinned",
+      "Sid": "RunEniLegSubnetPinned",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": "arn:aws:ec2:<region>:<account-id>:network-interface/*",
@@ -126,7 +126,7 @@
       }
     },
     {
-      "Sid": "RunInstancesSecurityGroupLegOnlyOurs",
+      "Sid": "RunSecGroupLegOurs",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": "arn:aws:ec2:<region>:<account-id>:security-group/*",
@@ -140,7 +140,7 @@
       }
     },
     {
-      "Sid": "RunInstancesVolumeLegEncryptedCapped",
+      "Sid": "RunVolumeLegEncrypted",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": "arn:aws:ec2:<region>:<account-id>:volume/*",
@@ -154,7 +154,7 @@
       }
     },
     {
-      "Sid": "RunInstancesImageLegPinnedOwner",
+      "Sid": "RunImageLegUpstream",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": "arn:aws:ec2:<region>::image/ami-*",
@@ -165,7 +165,7 @@
       }
     },
     {
-      "Sid": "RunInstancesCanaryImageLegOnlyOurs",
+      "Sid": "RunImageLegOurs",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": "arn:aws:ec2:<region>::image/ami-*",
@@ -190,7 +190,7 @@
       }
     },
     {
-      "Sid": "ReadConsoleOfOurCanaries",
+      "Sid": "ReadOurConsoleOutput",
       "Effect": "Allow",
       "Action": "ec2:GetConsoleOutput",
       "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
@@ -201,7 +201,7 @@
       }
     },
     {
-      "Sid": "EnaFlagOnlyOnOurInstances",
+      "Sid": "EnaFlagOnOurInstances",
       "Effect": "Allow",
       "Action": "ec2:ModifyInstanceAttribute",
       "Resource": "arn:aws:ec2:<region>:<account-id>:instance/*",
@@ -213,7 +213,7 @@
       }
     },
     {
-      "Sid": "SurrogateSnapshotCreateSnapshotLeg",
+      "Sid": "SurrogateSnapCreateLeg",
       "Effect": "Allow",
       "Action": "ec2:CreateSnapshot",
       "Resource": "arn:aws:ec2:<region>::snapshot/*"
@@ -230,7 +230,7 @@
       }
     },
     {
-      "Sid": "SurrogateSnapshotVolumeLegEncrypted",
+      "Sid": "SurrogateSnapVolumeLeg",
       "Effect": "Allow",
       "Action": "ec2:CreateSnapshot",
       "Resource": "arn:aws:ec2:<region>:<account-id>:volume/*",
@@ -255,7 +255,7 @@
       }
     },
     {
-      "Sid": "RegisterImageFromOurTaggedEncryptedSnapshot",
+      "Sid": "RegisterImageSnapshotLeg",
       "Effect": "Allow",
       "Action": "ec2:RegisterImage",
       "Resource": "arn:aws:ec2:<region>::snapshot/*",
@@ -275,7 +275,7 @@
       "Resource": "arn:aws:ec2:<region>::image/*"
     },
     {
-      "Sid": "ImageAttributesAllowlisted",
+      "Sid": "ImageAttrsAllowlisted",
       "Effect": "Allow",
       "Action": "ec2:ModifyImageAttribute",
       "Resource": "arn:aws:ec2:<region>::image/*",
