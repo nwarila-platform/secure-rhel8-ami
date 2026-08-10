@@ -85,7 +85,9 @@ jobs:
           path: aws-packer-framework
           persist-credentials: false
           # feat: hard-block BIOS, UEFI-only surrogate (#4)
-          ref: 243f58a7fe43522a452a65d7e918d33bc5e4add2
+          # Post-purge SHA: the ADR-0010 history rewrite replaced every commit id in
+          # aws-packer-framework, orphaning the previous pin. Same tree, new id.
+          ref: 3e3384d894db260b7d5268174b489a0d8f37f0a3
           repository: nwarila-platform/aws-packer-framework
 
       - name: Checkout Ansible Framework Repository
