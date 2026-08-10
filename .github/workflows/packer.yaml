@@ -249,7 +249,8 @@ jobs:
                       handle.write(f"- `{cve}` {severity} - {package}\n")
           PY
 
-      - name: SBOM Gate and Image Stamp
+      - name: SBOM Gate
+        id: gate
         working-directory: ${{ github.workspace }}/aws-packer-framework/packer
         env:
           IMAGE_FAMILY: rhel
@@ -316,6 +317,7 @@ jobs:
             for snapshot_id in "${snapshot_ids[@]}"; do
               aws ec2 delete-snapshot --snapshot-id "${snapshot_id}"
             done
+            echo "publish=false" >> "${GITHUB_OUTPUT}"
             {
               echo "## SBOM gate: no change"
               echo ""
@@ -323,19 +325,17 @@ jobs:
               echo "current image. Candidate and snapshots reaped; nothing published."
             } >> "${GITHUB_STEP_SUMMARY}"
           else
-            image_version="${VERSION_SLOTS}.$(date -u +%Y%m%d)"
-            commit_sha="$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD)"
-            aws ec2 create-tags --resources "${ami_id}" "${snapshot_ids[@]}" --tags \
-              "Key=ImageChangeKey,Value=${change_key}" \
-              "Key=ImageVersion,Value=${image_version}" \
-              "Key=CommitSha,Value=${commit_sha}" \
-              "Key=RunId,Value=${GITHUB_RUN_ID}"
+            # The candidate is a candidate only. Nothing is stamped until it has proved
+            # itself on a live boot: an image that never boots passes every check that
+            # reads the filesystem, and 7 of this project's first 8 images did exactly
+            # that. Publishing happens after the canary, not here.
+            echo "publish=true" >> "${GITHUB_OUTPUT}"
             {
-              echo "## SBOM gate: change detected, image published"
-              echo ""
-              echo "- AMI: \`${ami_id}\` (ImageVersion \`${image_version}\`)"
-              echo "- change-key: \`${change_key}\` (previous: \`${previous_key:-none}\`)"
-            } >> "${GITHUB_STEP_SUMMARY}"
+              echo "ami_id=${ami_id}"
+              echo "change_key=${change_key}"
+              echo "previous_key=${previous_key:-none}"
+              echo "snapshot_ids=${snapshot_ids[*]}"
+            } >> "${GITHUB_OUTPUT}"
           fi
 
           # The surrogate builder snapshots the assembled volume twice but RegisterImage
@@ -355,6 +355,196 @@ jobs:
             aws ec2 delete-snapshot --snapshot-id "${snapshot_id}" \
               && echo "reaped unreferenced snapshot ${snapshot_id}"
           done
+
+      # An image that never boots satisfies every check that reads a filesystem, and 7 of
+      # this project's first 8 images did exactly that: green build, dead image. The only
+      # proof that an image works is launching it, so nothing is published until a throwaway
+      # instance built from the candidate has booted and reported on itself.
+      #
+      # The instance gets no keypair and no ingress rule; everything it reports travels out
+      # through the serial console, which needs no network path to the runner.
+      - name: Canary Boot Verification
+        id: canary
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          CANDIDATE_AMI: ${{ steps.gate.outputs.ami_id }}
+          SUBNET_ID: ${{ vars.CANARY_SUBNET_ID || 'subnet-01a8835a525008dfc' }}
+          VPC_ID: ${{ vars.CANARY_VPC_ID || 'vpc-024afb5e25a56792c' }}
+          REPOSITORY_ID: "1326894519"
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/canary-user-data.sh <<'CANARY'
+          #!/bin/bash
+          exec >/dev/console 2>&1
+          echo "=====CANARY-START====="
+          fail=0
+
+          [ -d /sys/firmware/efi ] && echo "PASS:efi-boot" || { echo "FAIL:efi-boot"; fail=1; }
+
+          for target in /boot /boot/efi /home /opt /tmp /var /var/tmp /var/log /var/log/audit; do
+            findmnt -no TARGET,SOURCE,OPTIONS "${target}" \
+              || { echo "FAIL:not-mounted:${target}"; fail=1; }
+          done
+          for target in /tmp /var/tmp /var/log /var/log/audit; do
+            findmnt -no OPTIONS "${target}" | grep -q noexec \
+              || { echo "FAIL:noexec-missing:${target}"; fail=1; }
+          done
+
+          for keyfile in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
+            [ -s "${keyfile}" ] && { echo "FAIL:authorized-keys:${keyfile}"; fail=1; }
+          done
+          id packer >/dev/null 2>&1 && { echo "FAIL:packer-user"; fail=1; } \
+            || echo "PASS:no-build-user"
+
+          # The kernel the patched image actually booted, against the newest it ships. A
+          # mismatch means the default boot entry points at a superseded kernel, which is
+          # how a patched image silently runs unpatched.
+          running="$(uname -r)"
+          newest="$(ls /lib/modules | sort -V | tail -1)"
+          echo "kernel-running:${running} kernel-newest:${newest}"
+          [ "${running}" = "${newest}" ] && echo "PASS:newest-kernel-booted" \
+            || { echo "FAIL:stale-kernel-booted"; fail=1; }
+
+          # The five STIG rules the offline scan cannot answer are all systemd service
+          # state, which exists only on a running system. Evaluate exactly those here, with
+          # the same scanner and datastream the offline pass uses, so the profile result is
+          # complete rather than 96 percent complete.
+          if dnf install -y -q openscap-scanner scap-security-guide >/dev/null 2>&1; then
+            oscap xccdf eval \
+              --profile xccdf_org.ssgproject.content_profile_stig \
+              --rule xccdf_org.ssgproject.content_rule_service_sshd_enabled \
+              --rule xccdf_org.ssgproject.content_rule_service_auditd_enabled \
+              --rule xccdf_org.ssgproject.content_rule_service_rsyslog_enabled \
+              --rule xccdf_org.ssgproject.content_rule_service_kdump_disabled \
+              --rule xccdf_org.ssgproject.content_rule_service_debug-shell_disabled \
+              /usr/share/xml/scap/ssg/content/ssg-rhel8-ds.xml 2>/dev/null \
+              | grep -E '^(Title|Result)' | paste - - | sed 's/^/OSCAP-RUNTIME:/'
+            echo "OSCAP-RUNTIME:complete"
+          else
+            echo "OSCAP-RUNTIME:unavailable"
+          fi
+
+          [ "${fail}" = 0 ] && echo "CANARY-RESULT:PASS" || echo "CANARY-RESULT:FAIL"
+          echo "=====CANARY-END====="
+          CANARY
+
+          # The build role may only launch into a security group carrying this repository id,
+          # so the canary brings its own rather than falling back to the VPC default. It has
+          # no ingress rules at all: the canary is never connected to, it only reports out
+          # through the serial console.
+          group_id="$(aws ec2 create-security-group \
+            --group-name "canary-secure-rhel8-${GITHUB_RUN_ID}" \
+            --description "Egress-only group for the secure-rhel8 boot canary" \
+            --vpc-id "${VPC_ID}" \
+            --tag-specifications "ResourceType=security-group,Tags=[\
+          {Key=Name,Value=canary-secure-rhel8},\
+          {Key=RepositoryId,Value=${REPOSITORY_ID}}]" \
+            --query 'GroupId' --output text)"
+          echo "group_id=${group_id}" >> "${GITHUB_OUTPUT}"
+
+          instance_id="$(aws ec2 run-instances \
+            --image-id "${CANDIDATE_AMI}" --instance-type t3.medium \
+            --subnet-id "${SUBNET_ID}" --security-group-ids "${group_id}" \
+            --metadata-options \
+              'HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=1' \
+            --user-data "file:///tmp/canary-user-data.sh" \
+            --tag-specifications "ResourceType=instance,Tags=[\
+          {Key=Name,Value=canary-secure-rhel8},\
+          {Key=RepositoryId,Value=${REPOSITORY_ID}},\
+          {Key=RunId,Value=${GITHUB_RUN_ID}}]" \
+            --query 'Instances[0].InstanceId' --output text)"
+          echo "instance_id=${instance_id}" >> "${GITHUB_OUTPUT}"
+          echo "canary instance ${instance_id} launched from ${CANDIDATE_AMI}"
+
+          verdict="TIMEOUT"
+          for _ in $(seq 1 30); do
+            sleep 20
+            aws ec2 get-console-output --instance-id "${instance_id}" --latest \
+              --output text > /tmp/canary-console.log 2>/dev/null || true
+            if grep -q 'CANARY-END' /tmp/canary-console.log; then
+              verdict="$(grep -o 'CANARY-RESULT:[A-Z]*' /tmp/canary-console.log | tail -1)"
+              break
+            fi
+          done
+
+          mkdir -p evidence
+          sed -n '/CANARY-START/,/CANARY-END/p' /tmp/canary-console.log \
+            > evidence/canary-console.log || true
+          {
+            echo "## Canary boot verification"
+            echo ""
+            echo '```'
+            cat evidence/canary-console.log
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          [ "${verdict}" = "CANARY-RESULT:PASS" ] || {
+            echo "::error::canary verdict ${verdict} for ${CANDIDATE_AMI}"
+            exit 1
+          }
+
+      # Publishing is the assertion that this image works, so it happens only after the
+      # canary has proved it. A failed canary skips this step, leaving the candidate
+      # unstamped and reaped below - the floating image keeps pointing at the last image
+      # that actually booted.
+      - name: Publish Verified Image
+        if: steps.gate.outputs.publish == 'true' && steps.canary.outcome == 'success'
+        env:
+          AMI_ID: ${{ steps.gate.outputs.ami_id }}
+          CHANGE_KEY: ${{ steps.gate.outputs.change_key }}
+          PREVIOUS_KEY: ${{ steps.gate.outputs.previous_key }}
+          SNAPSHOT_IDS: ${{ steps.gate.outputs.snapshot_ids }}
+          VERSION_SLOTS: "8.10"
+        run: |
+          set -euo pipefail
+
+          image_version="${VERSION_SLOTS}.$(date -u +%Y%m%d)"
+          commit_sha="$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD)"
+          # shellcheck disable=SC2086
+          aws ec2 create-tags --resources "${AMI_ID}" ${SNAPSHOT_IDS} --tags \
+            "Key=ImageChangeKey,Value=${CHANGE_KEY}" \
+            "Key=ImageVersion,Value=${image_version}" \
+            "Key=CommitSha,Value=${commit_sha}" \
+            "Key=RunId,Value=${GITHUB_RUN_ID}"
+          {
+            echo "## Published: canary-verified image"
+            echo ""
+            echo "- AMI: \`${AMI_ID}\` (ImageVersion \`${image_version}\`)"
+            echo "- change-key: \`${CHANGE_KEY}\` (previous: \`${PREVIOUS_KEY}\`)"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # Always: terminate the canary, and reap a candidate that failed verification so a
+      # broken image leaves neither a running instance nor an unreferenced AMI behind.
+      - name: Reap Canary and Unverified Candidate
+        if: always() && steps.gate.outputs.publish == 'true'
+        env:
+          AMI_ID: ${{ steps.gate.outputs.ami_id }}
+          SNAPSHOT_IDS: ${{ steps.gate.outputs.snapshot_ids }}
+          INSTANCE_ID: ${{ steps.canary.outputs.instance_id }}
+          GROUP_ID: ${{ steps.canary.outputs.group_id }}
+          CANARY_OUTCOME: ${{ steps.canary.outcome }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${INSTANCE_ID}" ]; then
+            aws ec2 terminate-instances --instance-ids "${INSTANCE_ID}" \
+              --query 'TerminatingInstances[0].CurrentState.Name' --output text
+            # The group cannot be deleted while the instance still holds an interface in it.
+            aws ec2 wait instance-terminated --instance-ids "${INSTANCE_ID}"
+          fi
+
+          if [ -n "${GROUP_ID}" ]; then
+            aws ec2 delete-security-group --group-id "${GROUP_ID}"
+          fi
+
+          if [ "${CANARY_OUTCOME}" != "success" ]; then
+            aws ec2 deregister-image --image-id "${AMI_ID}"
+            for snapshot_id in ${SNAPSHOT_IDS}; do
+              aws ec2 delete-snapshot --snapshot-id "${snapshot_id}"
+            done
+            echo "reaped unverified candidate ${AMI_ID}"
+          fi
 
       - name: Upload Build Evidence
         if: always()
