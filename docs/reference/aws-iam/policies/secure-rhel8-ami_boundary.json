@@ -44,7 +44,10 @@
         "iam:ListPolicyVersions",
         "iam:TagPolicy"
       ],
-      "Resource": "arn:aws:iam::<account-id>:policy/secure-rhel8-ami_packer-build"
+      "Resource": [
+        "arn:aws:iam::<account-id>:policy/secure-rhel8-ami_packer-build",
+        "arn:aws:iam::<account-id>:policy/secure-rhel8-ami_packer-publish"
+      ]
     },
     {
       "Sid": "IamCeilingBuildRoleOnly",
