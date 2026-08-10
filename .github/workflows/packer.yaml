@@ -249,6 +249,30 @@ jobs:
                   handle.write("\nTop fixable Critical/High:\n\n")
                   for cve, package, severity in worst:
                       handle.write(f"- `{cve}` {severity} - {package}\n")
+
+          # A fixable Critical or High means Red Hat published a patch this image does not
+          # carry, which the build could have taken and did not. That is a defect in the
+          # artifact, not a fact about the world, so it fails here rather than being
+          # published and reported. Severities below High and anything upstream has not
+          # fixed are reported only: no rebuild resolves them, and failing on them would
+          # make the gate noise people route around.
+          blocking = sorted({
+              (m["vulnerability"]["id"], m["artifact"]["name"])
+              for m in fixable
+              if m["vulnerability"]["severity"] in ("Critical", "High")
+          })
+          if blocking:
+              with open(sys.argv[1], "a") as handle:
+                  handle.write(
+                      f"\n### Build failed: {len(blocking)} fixable Critical/High\n\n"
+                      "Red Hat has published a fix for each of these that this image does "
+                      "not carry.\n\n"
+                  )
+                  for cve, package in blocking:
+                      handle.write(f"- `{cve}` - {package}\n")
+              for cve, package in blocking:
+                  print(f"::error::fixable {cve} in {package}")
+              sys.exit(f"{len(blocking)} fixable Critical/High findings")
           PY
 
       - name: SBOM Gate
