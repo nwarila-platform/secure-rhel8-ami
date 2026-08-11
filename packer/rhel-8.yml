@@ -566,6 +566,23 @@
         set -euo pipefail
         truncate -s 0 {{ sysimage }}/etc/machine-id
         sync
+
+        # Discard the blocks freed by everything removed after the copy - the superseded
+        # kernel, its initramfs, the rescue image, rsync - roughly 400MB that is otherwise
+        # still IN the published image.
+        #
+        # A snapshot bills blocks that were WRITTEN, not blocks that currently hold a file.
+        # Deleting a file returns it to the filesystem, but EBS has no way to know that, so
+        # it keeps storing it and every launch keeps pulling it. fstrim is what tells EBS the
+        # blocks are free, and it has to happen while the filesystems are still mounted.
+        #
+        # vfat has no discard support, so the ESP is expected to decline; anything else that
+        # declines is reported and tolerated rather than failing an otherwise good image.
+        for target in $(findmnt -nlo TARGET --submounts {{ sysimage }}); do
+          fstrim "${target}" 2>/dev/null || echo "no discard on ${target}"
+        done
+        sync
+
         umount -R {{ sysimage }} || { sleep 3; umount -R {{ sysimage }}; } || umount -R -l {{ sysimage }}
         udevadm settle
         # Deactivation is belt-and-braces: Packer stops the instance before snapshotting,
