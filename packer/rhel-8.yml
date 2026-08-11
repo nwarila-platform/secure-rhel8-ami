@@ -141,6 +141,30 @@
       - NetworkManager-tui
       # Manual page infrastructure, alongside the documentation removed below.
       - man-db
+      # Second pass, each checked for cascades on a probe instance first.
+      #
+      # Kerberos credential cache and NFS id mapping. sssd-common is deliberately NOT here:
+      # the default authselect profile is sssd, so removing the daemon while PAM still
+      # references pam_sss risks authentication rather than saving meaningful space.
+      - sssd-kcm
+      - sssd-nfs-idmap
+      # Hardware inventory, SCSI utilities and interrupt balancing for hardware a guest does
+      # not own, and predictable interface naming the image disables with net.ifnames=0.
+      - lshw
+      - lsscsi
+      - sg3_utils
+      - irqbalance
+      - prefixdevname
+      # cron: RHEL 8 runs logrotate and the rest from systemd timers, and anything a
+      # deployed host needs on a schedule is Ansible's to install.
+      - cronie
+      # Crash dump tooling, the rescue-image generator, a compatibility shim for pre-8
+      # authconfig, and skeleton dotfiles.
+      - kexec-tools
+      - dracut-config-rescue
+      - authselect-compat
+      - rootfiles
+      - usermode
       # Needed to ASSEMBLE this image, never to run it. parted has finished partitioning
       # by the time the strip runs; rsync is excluded here because the copy still needs it,
       # and comes out of the assembled tree instead.
@@ -373,8 +397,13 @@
         find {{ sysimage }}/boot/loader/entries -name '*.conf' -print0 2>/dev/null \
           | xargs -0 -r grep -L "${newest_kver}" \
           | xargs -r rm -f
+        # The rescue image is a copy of whatever kernel was current when the source image
+        # was built - the superseded one - so it is both stale and roughly 100MB. It also
+        # cannot be used without console access, which no EC2 instance has. It goes with the
+        # kernel it came from rather than being kept by name.
         find {{ sysimage }}/boot -maxdepth 1 \( -name 'initramfs-*' -o -name 'vmlinuz-*' \) \
-          ! -name "*${newest_kver}*" ! -name '*rescue*' -delete
+          ! -name "*${newest_kver}*" -delete
+        rm -f {{ sysimage }}/boot/loader/entries/*rescue*.conf
       changed_when: true
 
     - name: Install the signed EFI bootloader into the image ESP
