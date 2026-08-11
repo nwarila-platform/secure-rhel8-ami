@@ -453,7 +453,34 @@
         touch {{ sysimage }}/.autorelabel
       changed_when: true
 
-    - name: Generate build evidence from the assembled image
+    # The boot work is done with the API filesystems, and oscap-chroot below manages its
+    # own: it bind-mounts /proc and /sys into the target and unmounts them when it finishes.
+    # Leaving ours in place means two sets of mounts over the same paths, and an unmount that
+    # propagates back through them takes /proc away from the BUILD INSTANCE - which ends
+    # every process on it, including the connection running this play.
+    #
+    # Released here rather than at the end: nothing after this point needs them, and mounts
+    # that outlive their purpose are what turned an unmount inside a chroot into a dead host.
+    - name: Release the chroot API filesystems
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for api in proc sys dev; do
+          if mountpoint -q "{{ sysimage }}/${api}"; then
+            umount -R "{{ sysimage }}/${api}"
+          fi
+        done
+
+        # Verify rather than assume: a bind still standing here is the precondition for the
+        # failure this task exists to prevent, so it should stop the build, not the host.
+        for api in proc sys dev; do
+          if mountpoint -q "{{ sysimage }}/${api}"; then
+            echo "still mounted after release: {{ sysimage }}/${api}" >&2
+            exit 1
+          fi
+        done
+      changed_when: true
+
+    - name: Export the package manifest and rpm database
       ansible.builtin.shell: |
         set -euo pipefail
         mkdir -p /tmp/evidence
@@ -470,12 +497,21 @@
         # data to match - reporting zero vulnerabilities for any image, however old.
         tar -C {{ sysimage }} -czf /tmp/evidence/rpmdb.tar.gz \
           var/lib/rpm etc/os-release etc/redhat-release etc/system-release
+      changed_when: true
 
-        # OpenSCAP STIG evaluation of the assembled tree. Report-only until the hardening
-        # roles land: oscap exits 2 when rules fail, which is expected and tolerated; any
-        # other nonzero exit still fails the build. (No apostrophes in this block:
-        # ansible free-form arg splitting.)
+    # Its own task, after the API filesystems are released: oscap-chroot bind-mounts /proc
+    # and /sys into the target itself and unmounts them when it finishes, and it is the
+    # longest-running command here. If the connection dies during it, the task name is the
+    # only evidence that survives.
+    - name: Evaluate the assembled image against the STIG profile
+      ansible.builtin.shell: |
+        set -euo pipefail
         dnf install -y openscap-scanner scap-security-guide
+
+        # oscap exits 2 when rules fail, which is the expected result for an image the
+        # platform deliberately leaves unconfigured - hardening is applied by Ansible after
+        # deployment. Any other nonzero exit is a real failure of the scan itself.
+        # (No apostrophes in this block: ansible free-form arg splitting.)
         rc=0
         oscap-chroot {{ sysimage }} xccdf eval \
           --profile xccdf_org.ssgproject.content_profile_stig \
