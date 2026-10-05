@@ -21,21 +21,20 @@ operator personally assumes through the organization SSO broker.
 | operator | `secure-rhel8-ami_boundary` · `secure-rhel8-ami_iam-manage` · `secure-rhel8-ami_iam-admin` · the `-admin` role | `bootstrap-iam.sh --tier operator --profile <sso>` — personally, never from CI | The workflow must never write its own authority |
 
 The anti-escalation chain: the non-admin role's `iam-manage` grant can manage **only** the
-build policy and the role's own trust/boundary/attachments; it can attach **only** this repo's
+two repo-tier policies (`packer-build`, `packer-publish`) and the role's own trust/boundary/attachments; it can attach **only** this repo's
 policies (`iam:PolicyARN` condition); create/re-bound requires the permissions boundary
 (`iam:PermissionsBoundary` condition); explicit Denies cover the `-admin` role, the boundary,
 and both governance policies; and the boundary caps the role's effective permissions —
-region-pinned EC2 plus IAM on exactly the two repo-tier objects — even if the build policy
-document were rewritten wider. The account OIDC provider is account Layer-0, operator-owned,
+region-pinned EC2, IAM on the three repo-tier objects (the two policies and the role) and
+`access-analyzer:ValidatePolicy` — even if the build policy document were rewritten wider. The account OIDC provider is account Layer-0, operator-owned,
 not managed here.
 
 ## Iterative policy derivation
 
-`secure-rhel8-ami_packer-build` and `secure-rhel8-ami_packer-publish` are developed **empirically**: it started as a blank baseline
-(`sts:GetCallerIdentity` only) and every statement is added in response to an observed
-`UnauthorizedOperation` denial from a real build run — one denial, one commit, one
-`iam.yml apply`, re-run. The commit history of the policy file is the least-privilege
-derivation record; nothing in it is speculative.
+`secure-rhel8-ami_packer-build` and `secure-rhel8-ami_packer-publish` were developed **empirically**:
+statements were added in response to `UnauthorizedOperation` denials from real build runs, and the
+commit history of the policy files is the derivation record. Not every commit adds exactly one
+statement: PR #53 (`55f9906`), for example, added the three canary permissions in one commit.
 
 ## Substitution contract
 
@@ -51,11 +50,15 @@ repository's value left in one condition fails open and silently.
 | `<owner-id>` | the `nwarila-platform` org id | `gh api orgs/nwarila-platform --jq .id` |
 | `<region>` | the build region | the build plan (`us-east-1`) |
 | `<vpc-id>` | the build VPC | `aws ec2 describe-vpcs` — one VPC account-wide, shared by all siblings |
+| `<subnet-id>` | the build subnet | `packer/systems.auto.pkrvars.hcl` (`vpc_config.subnet_id`) |
+| `<source-ami-owner>` | the account that publishes the source AMI | `packer/systems.auto.pkrvars.hcl` (`source_ami.owners`, Red Hat's publishing account) |
+| `<sso-permission-set>` | the organization SSO permission-set name, `AdministratorAccess` unless overridden; the trust document appends the role's 16-character suffix as a separate wildcard | `scripts/bootstrap-iam.sh` (`SSO_PERMISSION_SET`, default `AdministratorAccess`) |
 
-`<repository-id>` is the one that can hurt you: it is the sole authorization key for the
-tag-gated lifecycle statements (terminate, volume/snapshot mutation). A sibling's id left in
-any statement gives this repository's CI role destroy authority over that sibling's tagged
-resources. Substitute it everywhere in one operation.
+`<repository-id>` is the one that can hurt you: it is the tag value the ten tag-gated statements
+listed under "Identity tag" below test (terminate, image deregistration and snapshot deletion among
+them), beside their VPC, attribute or encryption conditions. A sibling's id left in any of them gives
+this repository's CI role that authority over the sibling's tagged resources. Substitute it everywhere
+in one operation.
 
 ## Role-to-policy map
 
@@ -72,33 +75,47 @@ permission-set hash.
 
 ## Design notes
 
-- **Identity tag**: `RepositoryId = <repository-id>`, applied by Packer's
-  `run_tags`/`snapshot_tags` at create time (`aws:RequestTag` on the instance, volume, and
-  snapshot legs) and required by `ec2:ResourceTag` on every mutating action. The committed
-  inventory carries the tag; removing it from `systems.auto.pkrvars.hcl` fails the build closed.
+- **Identity tag**: `RepositoryId = <repository-id>`, applied by Packer from the committed inventory's
+  `tags`, `run_tags` and `snapshot_tags`, and tested by `ec2:ResourceTag/RepositoryId` on ten statements:
+  `TempSecGroupLifecycleOurs`, `RunSecGroupLegOurs`, `InstanceLifecycleOnlyOurs`, `EnaFlagOnOurInstances` and
+  `RegisterImageSnapshotLeg` in the build policy; `RunImageLegOurs`, `ReadOurConsoleOutput`,
+  `SnapshotDeleteOnlyOurs`, `DeregisterOnlyOurImages` and `RetagOurTaggedSnapshots` in the publish policy.
+  No other statement carries a tag condition, and none uses `aws:RequestTag`.
 - **Encryption required**: the RunInstances volume leg requires `ec2:Encrypted: true` and caps
-  volume size at 64 GiB — the build uses a 30 GiB root plus a 30 GiB surrogate.
-- **Instance types pinned** to `t3.medium` / `t3.large`, matching the committed inventory.
+  volume size at 30 GiB — the build uses a 30 GiB root plus a 30 GiB surrogate.
+- **Instance type pinned** to `t3.medium`, matching the committed inventory.
 - **No credential on the build instance**: the role attaches no instance profile, and the
   variable contract has no static-key inputs; the AMI itself therefore carries no path to AWS
   credentials.
 
 ## Known residuals (accepted, recorded rather than hidden)
 
-- **Temporary key pair and security group are name-scoped, not tag-scoped** (`packer_*` ARN
-  prefix for key pairs; region+VPC pin for security groups). Packer creates both before any
-  tag exists and EC2 offers no create-time tag condition on these legs through this builder.
-- **Volume and snapshot legs are region-scoped, not tag-gated**: the surrogate builder's
-  volume/snapshot tagging timing is not create-time-guaranteed, and a `ResourceTag` condition
-  here would fail a build closed twenty minutes in. Tighten with CloudTrail evidence from real
-  runs (the windows-wsus "proven live" method) rather than by assumption.
+- **The temporary key pair is name-scoped, not tag-scoped** (`packer_*` ARN prefix on its create and
+  delete legs); it is tagged at creation under `ec2:CreateAction`, but nothing later tests that tag. The
+  temporary security group is created in the pinned VPC and tagged at creation; its ingress and delete
+  legs require `ec2:ResourceTag/RepositoryId` and the VPC (`TempSecGroupLifecycleOurs`).
+- **Volume legs carry no tag condition** (`RunVolumeLegEncrypted` and `SurrogateSnapVolumeLeg`: encryption
+  and the 30 GiB cap only), and neither does the `CreateSnapshot` leg (`SurrogateSnapCreateLeg`); the
+  plugin sends `snapshot_tags` with the create request, which `TagSnapshotOnCreate` allows under
+  `ec2:CreateAction`. The snapshot legs of `RegisterImage`, `DeleteSnapshot` and the snapshot re-tag test
+  the tag. Tighten with CloudTrail evidence from real runs (the windows-wsus
+  "proven live" method) rather than by assumption.
 - **`iam.yml` and `packer.yaml` share the non-admin role** (two-role model, owner decision):
   a compromised build workflow could reach the repo-tier IAM surface. The cap is the trust
   (`job_workflow_ref` limits which workflows assume the role at all), the gated sources, the
   iam-manage Denies, and the boundary ceiling. The role can update its own trust document —
   accepted because the trust source rides the same gated PR path as every other IAM change.
+- **`iam-admin` cannot manage `secure-rhel8-ami_packer-publish`**: its `ManageAllRepoPolicies`
+  statement lists `packer-build`, the boundary, `iam-manage` and `iam-admin` only, so the
+  `-admin` path as documented cannot create or version the publish policy; that policy was
+  applied through the workflow path.
 - **`ec2:CreateTags` is resource-type-scoped but not tag-value-gated**: Packer applies AMI and
   snapshot tags after creation rather than through create-time tag specifications on
-  RegisterImage, so the grant covers the four resource types in-region.
-- **`RegisterImage`/`DeregisterImage` are region-scoped**: image ARNs carry no account or tag
-  context usable here.
+  RegisterImage, so the grant covers six resource types in-region (instance, network interface,
+  key pair, security group, snapshot, image): create-time legs under `ec2:CreateAction`, the image
+  leg under `aws:ResourceAccount`, the snapshot re-tag leg under the `RepositoryId` tag.
+- **`RegisterImage` is region-scoped on its image leg** (`image/*`: an image has no tag at
+  registration); its snapshot leg requires the `RepositoryId` tag and encryption. `DeregisterImage`,
+  and the canary's `RunInstances` on our images, require `ec2:ResourceTag/RepositoryId`, which Packer
+  applies from the inventory's `tags` map right after registration, before the canary; the workflow's
+  later `CreateTags` writes only the four publication tags.
