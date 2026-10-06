@@ -4,25 +4,27 @@
 # ------------------------------------------------------------------------------------------- #
 # Two tiers with a deliberate privilege split:
 #
-#   --tier repo (default)   The build boundary: the packer-build policy and the build role
-#                           (trust, boundary attachment, policy attachment). Applied by the
-#                           iam.yml workflow, which assumes github_<owner>_<repo>-iam via OIDC.
-#                           That role can manage ONLY these two objects, can only attach this
-#                           repo's policy, can only set this repo's permissions boundary, and
-#                           carries explicit Denies on itself, its own policy, and the boundary
-#                           — so a compromised workflow cannot widen its own authority, and any
-#                           widening of the build policy is still capped by the boundary.
+#   --tier repo (default)   The repo tier: the packer-build and packer-publish policies and the
+#                           non-admin role github_<owner>_<repo> (trust, boundary attachment, policy
+#                           attachments). Applied by the iam.yml workflow, which assumes that same
+#                           role via OIDC. Through iam-manage the role can manage ONLY those two
+#                           policies and its own trust, boundary and attachments, can attach only
+#                           this repo's policies, can only set this repo's permissions boundary, and
+#                           carries explicit Denies on the governance objects — so a compromised
+#                           workflow cannot widen its own authority, and any widening of the build
+#                           policy is still capped by the boundary.
 #
 #   --tier operator         The governance layer the workflow must never write: the permissions
-#                           boundary, the iam-manage policy, and the -iam management role. Run
-#                           once by an operator with SSO credentials, then only when the
+#                           boundary, the iam-manage and iam-admin policies, and the -admin role.
+#                           Run once by an operator with SSO credentials, then only when the
 #                           governance layer itself changes. The account OIDC provider is
 #                           account Layer-0 and is not managed here.
 #
 #   ./scripts/bootstrap-iam.sh [--plan|--apply|--check-drift] [--tier repo|operator] [--profile NAME]
 #
-# --check-drift compares LIVE IAM against the tracked source and fails on any difference — the
-# one comparison neither other gate makes: check-iam-literals.sh reads source vs filesystem, so
+# --check-drift compares the LIVE policy documents, trust documents and the build role's
+# permissions boundary against the tracked source and fails on any difference; it does not
+# compare policy attachments. It is the one comparison neither other gate makes: check-iam-literals.sh reads source vs filesystem, so
 # it passes while live holds an older version. (A sibling repo learned this the hard way when a
 # stale live trust de-credentialed CI with nothing to catch it.)
 #
@@ -69,10 +71,10 @@ ACCOUNT="$(aws sts get-caller-identity "${AWSARGS[@]}" --query Account --output 
 REPO_ID="$(gh api "repos/${OWNER}/${REPO}" --jq .id)" || die "GitHub repo ${OWNER}/${REPO} not found"
 OWNER_ID="$(gh api "orgs/${OWNER}" --jq .id)" || die "cannot resolve owner id for ${OWNER}"
 VPC_ID="$(aws ec2 describe-vpcs "${AWSARGS[@]}" --query 'Vpcs[0].VpcId' --output text)" || die 'cannot resolve VPC'
-SUBNET_ID="$(sed -n 's/^ *subnet_id *= *"\(subnet-[a-f0-9]*\)".*/\1/p' "${ROOT}/packer/systems.auto.pkrvars.hcl" | head -1)"
-[ -n "${SUBNET_ID}" ] || die 'cannot resolve subnet_id from packer/systems.auto.pkrvars.hcl'
-AMI_OWNER="$(sed -n 's/^ *owners *= *\["\([0-9]*\)"\].*/\1/p' "${ROOT}/packer/systems.auto.pkrvars.hcl" | head -1)"
-[ -n "${AMI_OWNER}" ] || die 'cannot resolve source AMI owner from packer/systems.auto.pkrvars.hcl'
+SUBNET_ID="$(sed -n 's/^ *subnet_id *= *"\(subnet-[a-f0-9]*\)".*/\1/p' "${ROOT}/images/rhel-8/rhel-8.pkrvars.hcl" | head -1)"
+[ -n "${SUBNET_ID}" ] || die 'cannot resolve subnet_id from images/rhel-8/rhel-8.pkrvars.hcl'
+AMI_OWNER="$(sed -n 's/^ *owners *= *\["\([0-9]*\)"\].*/\1/p' "${ROOT}/images/rhel-8/rhel-8.pkrvars.hcl" | head -1)"
+[ -n "${AMI_OWNER}" ] || die 'cannot resolve source AMI owner from images/rhel-8/rhel-8.pkrvars.hcl'
 SSO_PS="${SSO_PERMISSION_SET:-AdministratorAccess}"
 say 'account / region' "${ACCOUNT} / ${REGION}"
 say 'repository id / owner id' "${REPO_ID} / ${OWNER_ID}"

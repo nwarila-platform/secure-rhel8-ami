@@ -4,34 +4,32 @@
 [![Security](https://github.com/nwarila-platform/secure-rhel8-ami/actions/workflows/security.yaml/badge.svg)](https://github.com/nwarila-platform/secure-rhel8-ami/actions/workflows/security.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Consumer repository for [aws-packer-framework](https://github.com/nwarila-platform/aws-packer-framework): builds and
-publishes hardened RHEL 8 AMIs for this account on the DISA STIG / CIS compliance track. This repo owns the RHEL 8
-Packer inventory, the first-boot user-data template, the playbook and the caller workflows; the framework owns the
-Packer template (sources, variable contract, provisioner wiring). The playbook is not data: it updates the instance,
-partitions the surrogate volume, copies the root in and runs the OpenSCAP evaluation.
+Image factory for this account's hardened RHEL 8 AMIs on the DISA STIG / CIS compliance track. The repository owns the
+shared Packer template under `packer/`, one folder per image under `images/` (the source AMI selection, the first-boot user
+data, the build playbook and the profile vars files), and the workflows that build, verify and publish; the Ansible
+roles the playbook includes come from [ansible-framework](https://github.com/nwarila-platform/ansible-framework) at a
+SHA-pinned ref.
 
 ## Ownership Model
 
 | Layer | Owner | Where |
 |-------|-------|-------|
-| Packer orchestration, variable contract, `amazon-ebssurrogate` builder | [aws-packer-framework](https://github.com/nwarila-platform/aws-packer-framework) | SHA-pinned checkout in CI |
-| Source AMI selection (owner-scoped name filter, newest match; `ami_id` left null) and its audit trail | This repo | [packer/systems.auto.pkrvars.hcl](packer/systems.auto.pkrvars.hcl) |
-| First-boot user data | This repo | [packer/user-data.pkrtpl.hcl](packer/user-data.pkrtpl.hcl) |
-| Hardening playbook | This repo | [packer/rhel-8.yml](packer/rhel-8.yml) |
+| Packer template: sources (`amazon-ebssurrogate`, `amazon-ebs`), variable contract, provisioner wiring, manifest | This repo | [packer/](packer/) |
+| Image inputs: source AMI selection (owner-scoped name filter, newest match; `ami_id` left null) and its audit trail, first-boot user data, build playbook, profile vars | This repo, one folder per image | [images/rhel-8/](images/rhel-8/) |
 | Ansible roles (os_bootstrap, hardening) | [ansible-framework](https://github.com/nwarila-platform/ansible-framework) | SHA-pinned checkout in CI |
 
 ## How a Build Works
 
-1. CI checks out `aws-packer-framework` and `ansible-framework` at SHA-pinned refs.
-2. Consumer files (`systems.auto.pkrvars.hcl`, `user-data.pkrtpl.hcl`, `rhel-8.yml`) are synced into the framework's
-   `packer/` working directory; the `.auto.pkrvars.hcl` suffix makes Packer load the inventory automatically.
-3. The framework resolves the owner-scoped official Red Hat RHEL 8.10 source AMI (owner `309956199498`), launches the
+1. CI checks out `ansible-framework` at a SHA-pinned ref inside the repository checkout.
+2. For each matrix entry (image, profile, source), Packer runs from `packer/` and loads the image's
+   `images/<image>/<image>.pkrvars.hcl` and `images/<image>/profiles/<profile>.yml` by path.
+3. The template resolves the owner-scoped official Red Hat RHEL 8.10 source AMI (owner `309956199498`), launches the
    build instance with IMDSv2 enforced and encrypted EBS volumes, and connects as `ec2-user` with a Packer-generated
    temporary keypair.
-4. The Ansible provisioner runs [packer/rhel-8.yml](packer/rhel-8.yml), which dispatches through ansible-framework's
-   `os_bootstrap` role (RedHat-family hosts route to `RedHat_Rocky_8`, whose strict assertion accepts RHEL/Rocky 8).
-   STIG and CIS hardening roles are layered on from ansible-framework as they land.
-5. The framework registers a timestamped, tagged, encrypted AMI (`secure-rhel8-<timestamp>`) and writes the build
+4. The Ansible provisioner runs [images/rhel-8/playbook.yml](images/rhel-8/playbook.yml), which dispatches through
+   ansible-framework's `os_bootstrap` role (RedHat-family hosts route to `RedHat_Rocky_8`, whose strict assertion
+   accepts RHEL/Rocky 8). STIG and CIS hardening roles are layered on from ansible-framework as they land.
+5. The template registers a timestamped, tagged, encrypted AMI (`secure-rhel8-<timestamp>`) and writes the build
    manifest.
 
 See [docs/explanation/stig-cis-hardening-strategy.md](docs/explanation/stig-cis-hardening-strategy.md) for the
@@ -41,8 +39,8 @@ compliance approach and its known limits.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| PR Verify | Every PR to `main` (and merge queue) | actionlint, pre-commit gates, playbook syntax check, composed `packer validate` against the SHA-pinned framework |
-| Packer Build (AWS) | Push to `main` touching `packer/**` or `.github/workflows/packer.yaml` (gated by `vars.PACKER_BUILD_ENABLED`), or `workflow_dispatch` | Assumes the OIDC build role, syncs consumer files into the framework checkout, runs `packer validate` + `packer build` |
+| PR Verify | Every PR to `main` (and merge queue) | actionlint, pre-commit gates, then for every image folder and profile: playbook syntax check and `packer validate` from `packer/` |
+| Packer Build (AWS) | Push to `main` touching `packer/**`, `images/**` or `.github/workflows/packer.yaml` (gated by `vars.PACKER_BUILD_ENABLED`), or `workflow_dispatch` | Per matrix entry: assumes the OIDC build role, runs `packer validate` + `packer build` from `packer/` with the image's inputs |
 | Security | Push/PR to `main`, merge queue, weekly schedule (Mondays 08:00 UTC), `branch_protection_rule`, `workflow_dispatch` | Org `reusable-iac-security`, `reusable-codeql`, and `reusable-scorecard` reusables |
 | Repo Hygiene | PR to `main`, merge queue, weekly schedule (Mondays 08:00 UTC), `workflow_dispatch` | Org `reusable-repo-hygiene` policy |
 | Release Please | Push to `main` (opt-in via `RELEASE_PLEASE_ON_PUSH`) or `workflow_dispatch` | Changelog and release automation |
@@ -74,7 +72,7 @@ pre-commit install --hook-type commit-msg
 pre-commit run --all-files
 ```
 
-For validating the composed Packer configuration from a workstation, and for running a build by dispatch, see
+For validating the Packer configuration from a workstation, and for running a build by dispatch, see
 [docs/runbooks/manual-packer-build.md](docs/runbooks/manual-packer-build.md).
 
 ## Consuming the AMIs

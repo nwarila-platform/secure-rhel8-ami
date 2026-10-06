@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - packer/**
+      - images/**
       - .github/workflows/packer.yaml
 
 permissions:
@@ -17,6 +18,7 @@ concurrency:
 
 jobs:
   packer:
+    name: ${{ matrix.image }} (${{ matrix.profile }})
     # Auto-build on push to main is gated behind the PACKER_BUILD_ENABLED repo
     # variable so merging a packer change does not attempt an AMI build before
     # the GitHub OIDC role (AWS_PACKER_ROLE_ARN) and the packer-build
@@ -31,6 +33,17 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    strategy:
+      fail-fast: false
+      # One entry per image and profile. The image names the folder under images/, the
+      # profile names the vars file under that folder's profiles/, and the source names
+      # the Packer source the image builds with: the surrogate for Linux images that
+      # assemble their own partition layout, plain EBS for Windows images.
+      matrix:
+        include:
+          - image: rhel-8
+            profile: stig
+            source: amazon-ebssurrogate.packer_image
     defaults:
       run:
         shell: bash
@@ -39,6 +52,11 @@ jobs:
       PACKER_ZIP_SHA256: "2fd1149c5c6c7604ced64d7b56638af05f6b7ed3f6835182bc913ddaba1f16b8"
       PKR_VAR_aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       PKR_VAR_deploy_user_name: ${{ vars.DEPLOY_USER_NAME || 'ec2-user' }}
+      IMAGE: ${{ matrix.image }}
+      PROFILE: ${{ matrix.profile }}
+      # The playbook fetches its evidence to '<playbook_dir>/evidence', which is the image
+      # folder now that the playbook lives there.
+      EVIDENCE_DIR: ${{ github.workspace }}/images/${{ matrix.image }}/evidence
     steps:
       - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -77,18 +95,6 @@ jobs:
           python3 -m pip install --disable-pip-version-check --no-input \
             ansible-core==2.16.14
           ansible-playbook --version
-
-      - name: Checkout Packer Framework Repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 1
-          path: aws-packer-framework
-          persist-credentials: false
-          # feat: hard-block BIOS, UEFI-only surrogate (#4)
-          # Post-purge SHA: the ADR-0010 history rewrite replaced every commit id in
-          # aws-packer-framework, orphaning the previous pin. Same tree, new id.
-          ref: 3e3384d894db260b7d5268174b489a0d8f37f0a3
-          repository: nwarila-platform/aws-packer-framework
 
       - name: Checkout Ansible Framework Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -146,35 +152,34 @@ jobs:
           set -euo pipefail
           aws sts get-caller-identity
 
-      - name: Sync Consumer Files Into Framework Checkout
-        run: |
-          set -euo pipefail
-
-          destination_dir="${GITHUB_WORKSPACE}/aws-packer-framework/packer"
-
-          cp -f "${GITHUB_WORKSPACE}/packer/systems.auto.pkrvars.hcl" "${destination_dir}/"
-          cp -f "${GITHUB_WORKSPACE}/packer/user-data.pkrtpl.hcl" "${destination_dir}/"
-          cp -f "${GITHUB_WORKSPACE}/packer/rhel-8.yml" "${destination_dir}/"
-
       - name: Packer Init
-        working-directory: ${{ github.workspace }}/aws-packer-framework/packer
+        working-directory: ${{ github.workspace }}/packer
         run: |
           set -euo pipefail
           packer init .
 
+      # Packer runs from packer/, where the template lives; the image's inputs are passed by
+      # path. The pkrvars' own relative paths (playbook, user data, the Ansible checkout) are
+      # written for this working directory.
       - name: Packer Validate and Build
-        working-directory: ${{ github.workspace }}/aws-packer-framework/packer
+        working-directory: ${{ github.workspace }}/packer
         env:
           ANSIBLE_CONFIG: ${{ github.workspace }}/ansible-framework/ansible.cfg
+          SOURCE: ${{ matrix.source }}
         run: |
           set -euo pipefail
 
-          packer validate .
+          packer validate \
+            -var-file="../images/${IMAGE}/${IMAGE}.pkrvars.hcl" \
+            -var="ansible_extra_vars_file=../images/${IMAGE}/profiles/${PROFILE}.yml" \
+            -only="${SOURCE}" .
           packer build -timestamp-ui -color=false \
-            -only=amazon-ebssurrogate.packer_image . | tee packer-build.log
+            -var-file="../images/${IMAGE}/${IMAGE}.pkrvars.hcl" \
+            -var="ansible_extra_vars_file=../images/${IMAGE}/profiles/${PROFILE}.yml" \
+            -only="${SOURCE}" . | tee packer-build.log
 
       - name: Generate SBOM and Vulnerability Report
-        working-directory: ${{ github.workspace }}/aws-packer-framework/packer
+        working-directory: ${{ github.workspace }}/images/${{ matrix.image }}
         env:
           SYFT_VERSION: v1.50.0
           SYFT_INSTALL_REF: 16223e6dd7893fe578787658ceb876257483d404
@@ -277,7 +282,7 @@ jobs:
 
       - name: SBOM Gate
         id: gate
-        working-directory: ${{ github.workspace }}/aws-packer-framework/packer
+        working-directory: ${{ github.workspace }}/packer
         env:
           IMAGE_FAMILY: rhel
           VERSION_SLOTS: "8.10"
@@ -302,16 +307,16 @@ jobs:
           source_ami="$(grep -m1 -oE 'Found Image ID: ami-[0-9a-f]+' packer-build.log | grep -oE 'ami-[0-9a-f]+')"
 
           # change-key = built truth (package set) + every input that shapes the image
-          # invisibly to rpm: upstream source AMI, consumer packer tree, framework and
-          # ansible-framework checkouts. Tree hash, not commit SHA: docs-only commits
-          # must not mint a new image.
-          manifest_sha="$(sha256sum evidence/rpm-manifest.tsv | cut -d ' ' -f 1)"
-          consumer_tree="$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD:packer)"
-          framework_sha="$(git -C "${GITHUB_WORKSPACE}/aws-packer-framework" rev-parse HEAD)"
+          # invisibly to rpm: upstream source AMI, the image folder and the shared template
+          # trees, and the ansible-framework checkout. Tree hash, not commit SHA: docs-only
+          # commits must not mint a new image.
+          manifest_sha="$(sha256sum "${EVIDENCE_DIR}/rpm-manifest.tsv" | cut -d ' ' -f 1)"
+          image_tree="$(git -C "${GITHUB_WORKSPACE}" rev-parse "HEAD:images/${IMAGE}")"
+          template_tree="$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD:packer)"
           ansible_sha="$(git -C "${GITHUB_WORKSPACE}/ansible-framework" rev-parse HEAD)"
           change_key="$(printf '%s\n' \
-            "${manifest_sha}" "${source_ami}" "${consumer_tree}" \
-            "${framework_sha}" "${ansible_sha}" | sha256sum | cut -d ' ' -f 1)"
+            "${manifest_sha}" "${source_ami}" "${image_tree}" \
+            "${template_tree}" "${ansible_sha}" | sha256sum | cut -d ' ' -f 1)"
 
           aws ec2 describe-images --owners self \
             --filters "Name=tag:ImageFamily,Values=${IMAGE_FAMILY}" "Name=state,Values=available" \
@@ -392,6 +397,7 @@ jobs:
       - name: Canary Boot Verification
         id: canary
         if: steps.gate.outputs.publish == 'true'
+        working-directory: ${{ github.workspace }}/images/${{ matrix.image }}
         env:
           CANDIDATE_AMI: ${{ steps.gate.outputs.ami_id }}
           SUBNET_ID: ${{ vars.CANARY_SUBNET_ID || 'subnet-01a8835a525008dfc' }}
@@ -576,17 +582,17 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: build-evidence
-          path: ${{ github.workspace }}/aws-packer-framework/packer/evidence
+          name: build-evidence-${{ matrix.image }}-${{ matrix.profile }}
+          path: ${{ github.workspace }}/images/${{ matrix.image }}/evidence
           if-no-files-found: warn
 
       - name: Upload Packer Build Diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: packer-build-diagnostics
+          name: packer-build-diagnostics-${{ matrix.image }}-${{ matrix.profile }}
           path: |
-            ${{ github.workspace }}/aws-packer-framework/packer/packer-build.log
-            ${{ github.workspace }}/aws-packer-framework/packer/manifests
+            ${{ github.workspace }}/packer/packer-build.log
+            ${{ github.workspace }}/packer/manifests
           if-no-files-found: warn
           retention-days: 14

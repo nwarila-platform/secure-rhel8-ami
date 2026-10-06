@@ -71,7 +71,26 @@
 !scripts/check-iam-literals.sh
 
 # --- packer ---
+# The shared Packer template, one line per file: a new template file is a deliberate
+# addition. The manifests/ directory exists for Packer's output (the manifest
+# post-processor fails without it) and stays empty in the tree.
 !packer/
-!packer/systems.auto.pkrvars.hcl
-!packer/user-data.pkrtpl.hcl
-!packer/rhel-8.yml
+!packer/builds.pkr.hcl
+!packer/data.pkr.hcl
+!packer/locals.pkr.hcl
+!packer/packer.pkr.hcl
+!packer/source.pkr.hcl
+!packer/variables.pkr.hcl
+!packer/manifests/
+!packer/manifests/.gitkeep
+
+# --- images ---
+# One folder per image; the profile vars files are the build matrix's second dimension.
+# Build evidence is written under images/<image>/evidence/ at run time and stays ignored.
+!images/
+!images/rhel-8/
+!images/rhel-8/rhel-8.pkrvars.hcl
+!images/rhel-8/playbook.yml
+!images/rhel-8/user-data.pkrtpl.hcl
+!images/rhel-8/profiles/
+!images/rhel-8/profiles/stig.yml
