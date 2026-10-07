@@ -90,16 +90,6 @@ jobs:
           set -euo pipefail
           pre-commit run --all-files
 
-      - name: Checkout Packer Framework Repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 1
-          path: aws-packer-framework
-          persist-credentials: false
-          # feat: hard-block BIOS, UEFI-only surrogate (#4)
-          ref: 243f58a7fe43522a452a65d7e918d33bc5e4add2
-          repository: nwarila-platform/aws-packer-framework
-
       - name: Checkout Ansible Framework Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -109,23 +99,70 @@ jobs:
           ref: e8b2b95ead21c56da13ac1b41fe54569a69a2977
           repository: nwarila-platform/ansible-framework
 
-      - name: Sync Consumer Files Into Framework Checkout
-        run: |
-          set -euo pipefail
-
-          destination_dir="${GITHUB_WORKSPACE}/aws-packer-framework/packer"
-
-          cp -f "${GITHUB_WORKSPACE}/packer/systems.auto.pkrvars.hcl" "${destination_dir}/"
-          cp -f "${GITHUB_WORKSPACE}/packer/user-data.pkrtpl.hcl" "${destination_dir}/"
-          cp -f "${GITHUB_WORKSPACE}/packer/rhel-8.yml" "${destination_dir}/"
-
-      - name: Composed Validation
-        working-directory: ${{ github.workspace }}/aws-packer-framework/packer
+      # The build matrix in packer.yaml names an image folder, a profile file and a Packer
+      # source per entry. Packer treats the profile path as an opaque string, so a missing or
+      # malformed profile would pass packer validate and fail only when Ansible reads it in a
+      # build. This step therefore checks the matrix against the tree, parses every profile
+      # through Ansible, and validates every image's inputs against both sources from packer/,
+      # the directory the build runs Packer from.
+      - name: Validate Images
+        working-directory: ${{ github.workspace }}/packer
         env:
           ANSIBLE_CONFIG: ${{ github.workspace }}/ansible-framework/ansible.cfg
         run: |
           set -euo pipefail
+          shopt -s nullglob
 
-          ansible-playbook --syntax-check -i localhost, -c local ./rhel-8.yml
+          # Every matrix entry must point at files that exist and a source the template defines.
+          python3 - "${GITHUB_WORKSPACE}" <<'PY'
+          import pathlib
+          import sys
+
+          import yaml
+
+          root = pathlib.Path(sys.argv[1])
+          workflow = yaml.safe_load((root / ".github/workflows/packer.yaml").read_text())
+          entries = workflow["jobs"]["packer"]["strategy"]["matrix"]["include"]
+          sources = {"amazon-ebssurrogate.packer_image", "amazon-ebs.packer_image"}
+          problems = []
+          for entry in entries:
+              image, profile, source = entry["image"], entry["profile"], entry["source"]
+              for required in (
+                  root / "images" / image / f"{image}.pkrvars.hcl",
+                  root / "images" / image / "playbook.yml",
+                  root / "images" / image / "profiles" / f"{profile}.yml",
+              ):
+                  if not required.is_file():
+                      problems.append(f"matrix entry {image}/{profile}: missing {required.relative_to(root)}")
+              if source not in sources:
+                  problems.append(f"matrix entry {image}/{profile}: unknown source {source}")
+          if not entries:
+              problems.append("the build matrix has no entries")
+          for problem in problems:
+              print(f"::error::{problem}")
+          sys.exit(1 if problems else 0)
+          PY
+
           packer init .
-          packer validate .
+
+          images=(../images/*/)
+          [ "${#images[@]}" -gt 0 ] || { echo "::error::no image folders under images/" >&2; exit 1; }
+
+          for image_dir in "${images[@]}"; do
+            image="$(basename "${image_dir}")"
+            vars_file="../images/${image}/${image}.pkrvars.hcl"
+            [ -f "${vars_file}" ] || { echo "::error::${image}: no ${image}.pkrvars.hcl" >&2; exit 1; }
+
+            profiles=("../images/${image}"/profiles/*.yml)
+            [ "${#profiles[@]}" -gt 0 ] || { echo "::error::${image}: no profiles" >&2; exit 1; }
+
+            for profile in "${profiles[@]}"; do
+              # Ansible parses the profile file here, so a missing or malformed one fails the
+              # pull request instead of the build.
+              ansible-playbook --syntax-check -i localhost, -c local \
+                --extra-vars "@${profile}" "../images/${image}/playbook.yml"
+              packer validate \
+                -var-file="${vars_file}" \
+                -var="ansible_extra_vars_file=${profile}" .
+            done
+          done

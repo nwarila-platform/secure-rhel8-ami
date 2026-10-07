@@ -48,24 +48,22 @@ disclosure. We will work with you to agree on a timeline.
 
 The following are **in scope** for security reports:
 
-- Inventory values that weaken the published AMIs (source AMI pins, metadata
-  options, encryption settings)
+- The Packer template under `packer/` and each image's inputs under `images/` that weaken
+  the published AMIs (source AMI selection, metadata options, encryption settings)
 - Hardening playbook gaps that leave a claimed control unenforced
 - Secrets or credentials exposed in workflows, user data, or build artifacts
 - CI/CD pipeline vulnerabilities (workflow injection, secret leakage, OIDC role misuse)
 
 The following are **out of scope**:
 
-- Vulnerabilities in the framework's executable build logic — report those to
-  [aws-packer-framework](https://github.com/nwarila-platform/aws-packer-framework/blob/main/SECURITY.md)
 - Vulnerabilities in upstream dependencies (Packer, Ansible, RHEL, AWS services)
 - Denial of service against build infrastructure
 
 ## Security Features
 
 - **No static credentials** — builds authenticate via GitHub OIDC role assumption only
-- **SHA-pinned dependencies** — the framework, ansible-framework, GitHub Actions, and
-  validation tooling are all pinned by commit SHA or verified checksum
+- **SHA-pinned dependencies** — ansible-framework, GitHub Actions, and validation tooling
+  are pinned by commit SHA or verified checksum; Packer and its plugins by exact version
 - **Owner-scoped source AMI** — the base image resolves only from Red Hat's official
   AMI account
 - **IMDSv2 and EBS encryption** enforced through the committed inventory

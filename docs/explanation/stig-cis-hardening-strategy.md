@@ -1,8 +1,8 @@
 # STIG/CIS Hardening Strategy
 
 This repository targets RHEL 8 AMIs that satisfy both the DISA STIG and the CIS
-benchmark, with hardening applied at build time by the aws-packer-framework Ansible
-provisioner running consumer-owned plays with roles from
+benchmark, with hardening applied at build time by the Packer template's Ansible
+provisioner running the image's playbook with roles from
 [ansible-framework](https://github.com/nwarila-platform/ansible-framework). No
 benchmark role runs in the build yet: the published image's posture, measured below, is a
 patched stock RHEL with the STIG partition layout and mount options, a package strip and no
@@ -12,12 +12,12 @@ credentials or identity state.
 
 1. **Base image** — the official Red Hat RHEL 8.10 AMI, resolved through an
    owner-scoped filter (`owners = ["309956199498"]`). Unscoped filters are rejected
-   by the framework at validate time.
-2. **Build-time posture** — the framework enforces IMDSv2 (`http_tokens = required`),
+   by the template at validate time.
+2. **Build-time posture** — the template enforces IMDSv2 (`http_tokens = required`),
    encrypts build and AMI volumes, and connects with a Packer-generated temporary
    keypair; no credentials are baked into the image.
-3. **Bootstrap** — [packer/rhel-8.yml](../../packer/rhel-8.yml) first baselines the
-   instance on the latest available packages, then dispatches through
+3. **Bootstrap** — [images/rhel-8/playbook.yml](../../images/rhel-8/playbook.yml) first
+   baselines the instance on the latest available packages, then dispatches through
    ansible-framework's `os_bootstrap` role. RedHat-family hosts route to
    `RedHat_Rocky_8`, whose strict assertion accepts RHEL/Rocky 8 and rejects
    anything else.
@@ -25,11 +25,13 @@ credentials or identity state.
    volume into the STIG layout (EFI system partition, `/boot`, and an LVM volume group
    with separate `/home`, `/opt`, `/tmp`, `/var`, `/var/tmp`, `/var/log` and
    `/var/log/audit`), copies the configured root in with credential and state excludes,
-   installs the signed UEFI bootloader, and hands the volume to the framework's
+   installs the signed UEFI bootloader, and hands the volume to the template's
    `amazon-ebssurrogate` source, which registers it UEFI-only.
 5. **Benchmark roles** — STIG and CIS hardening roles are layered onto the playbook
    from ansible-framework as they become available. The playbook is the single
-   integration point; adding a role does not change the framework contract.
+   integration point; adding a role does not change the template contract. The
+   profile an image is built for travels as a vars file under
+   `images/<image>/profiles/`, passed to the playbook by the build matrix.
 6. **Verification** — the playbook evaluates the assembled image offline against the
    STIG profile with `oscap-chroot` and fetches the ARF and HTML report into the build
    evidence artifact. The workflow then launches a canary instance from the candidate

@@ -50,8 +50,8 @@ repository's value left in one condition fails open and silently.
 | `<owner-id>` | the `nwarila-platform` org id | `gh api orgs/nwarila-platform --jq .id` |
 | `<region>` | the build region | the build plan (`us-east-1`) |
 | `<vpc-id>` | the build VPC | `aws ec2 describe-vpcs` — one VPC account-wide, shared by all siblings |
-| `<subnet-id>` | the build subnet | `packer/systems.auto.pkrvars.hcl` (`vpc_config.subnet_id`) |
-| `<source-ami-owner>` | the account that publishes the source AMI | `packer/systems.auto.pkrvars.hcl` (`source_ami.owners`, Red Hat's publishing account) |
+| `<subnet-id>` | the build subnet | `images/rhel-8/rhel-8.pkrvars.hcl` (`vpc_config.subnet_id`) |
+| `<source-ami-owner>` | the account that publishes the source AMI | `images/rhel-8/rhel-8.pkrvars.hcl` (`source_ami.owners`, Red Hat's publishing account) |
 | `<sso-permission-set>` | the organization SSO permission-set name, `AdministratorAccess` unless overridden; the trust document appends the role's 16-character suffix as a separate wildcard | `scripts/bootstrap-iam.sh` (`SSO_PERMISSION_SET`, default `AdministratorAccess`) |
 
 `<repository-id>` is the one that can hurt you: it is the tag value the ten tag-gated statements

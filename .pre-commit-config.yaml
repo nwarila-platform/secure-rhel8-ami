@@ -37,18 +37,19 @@ repos:
 
   # -------------------------------------------------------------------------- #
   #  Packer formatting                                                         #
-  #  Full packer validate requires the framework checkout; PR Verify runs the  #
-  #  composed validation. Local hooks keep the inventory canonically formatted.#
+  #  The template under packer/ and the per-image pkrvars under images/ are    #
+  #  both HCL; full validation runs in PR Verify. This hook keeps both trees   #
+  #  canonically formatted.                                                    #
   # -------------------------------------------------------------------------- #
   - repo: local
     hooks:
       - id: packer-fmt
-        name: "packer fmt - enforce canonical HCL formatting"
+        name: "packer fmt - enforce canonical HCL formatting (packer/, images/)"
         language: system
         entry: packer fmt -check -recursive
-        files: '\.pkr\.hcl$|\.pkrvars\.hcl$'
+        files: '\.pkr(vars)?\.hcl$'
         pass_filenames: false
-        args: ["packer/"]
+        args: ["packer/", "images/"]
 
   # -------------------------------------------------------------------------- #
   #  YAML linting                                                              #

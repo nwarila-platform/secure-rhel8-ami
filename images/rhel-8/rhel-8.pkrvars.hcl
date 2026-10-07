@@ -1,15 +1,14 @@
 # ============================================================================================= #
 # RHEL 8 — UEFI-preferred source AMI, SSH communicator, ansible-framework os_bootstrap        #
 #                                                                                               #
-# Consumer configuration for the aws-packer-framework.                                          #
-# See: https://github.com/nwarila-platform/aws-packer-framework/blob/main/docs/reference/template-contract.md #
+# This image's inputs to the Packer template under packer/ (variables in packer/variables.pkr.hcl). #
 # ============================================================================================= #
 
 # --- Source AMI -------------------------------------------------------------------------- #
-# This committed block is the audit trail of which base image each build consumed. Owner
-# 309956199498 is Red Hat's commercial AMI account; the owner-scoped filter tracks the
-# latest official RHEL 8.10 x86_64 Hourly2 GP3 AMI. Pin ami_id instead of the filter for a
-# fully reproducible build.
+# This committed block is the audit trail of the source selection rule; the AMI ID each build
+# resolved is in that build's log ("Found Image ID"). Owner 309956199498 is Red Hat's
+# commercial AMI account; the owner-scoped filter tracks the latest official RHEL 8.10 x86_64
+# Hourly2 GP3 AMI. Pin ami_id instead of the filter to make the source AMI selection reproducible.
 source_ami = {
   ami_id = null
   owners = ["309956199498"]
@@ -22,22 +21,23 @@ source_ami = {
 }
 
 # --- User Data Template ------------------------------------------------------------------ #
-# Consumer-owned cloud-init template, synced into the framework packer/ working directory by
-# the caller workflow. Rendered with the guaranteed template variable contract.
+# This image's cloud-init template, beside this file; the path is relative to packer/, the
+# directory Packer runs from. Rendered with the guaranteed template variable contract.
 user_data_template = {
-  template_path = "./user-data.pkrtpl.hcl"
+  template_path = "../images/rhel-8/user-data.pkrtpl.hcl"
   extra_vars    = {}
 }
 
 # --- Ansible Configuration --------------------------------------------------------------- #
-# Consumer-owned Ansible provisioner configuration. The framework handles connection wiring
-# (SSH) automatically; this repo owns the playbook, and roles are sourced from:
+# This image's Ansible provisioner configuration. The template handles connection wiring
+# (SSH) automatically; the playbook lives beside this file, and roles are sourced from the
+# ansible-framework checkout the workflow places at the repository root:
 # https://github.com/nwarila-platform/ansible-framework
 ansible_config = {
-  playbook_path     = "./rhel-8.yml"
+  playbook_path     = "../images/rhel-8/playbook.yml"
   requirements_path = null
-  roles_path        = "../../ansible-framework"
-  config_path       = "../../ansible-framework/ansible.cfg"
+  roles_path        = "../ansible-framework"
+  config_path       = "../ansible-framework/ansible.cfg"
   extra_vars        = {}
 }
 
@@ -79,9 +79,9 @@ packer_image = {
     Repository   = "nwarila-platform/secure-rhel8-ami"
     RepositoryId = "1326894519"
   }
-  # The RepositoryId tag is the IAM identity boundary: the build role's
-  # RunInstances grant requires it at launch and its lifecycle grants are gated on it (see
-  # docs/reference/aws-iam/). Removing it fails the build closed.
+  # The RepositoryId tag is the IAM identity boundary: ten statements of the build and
+  # publish policies test ec2:ResourceTag/RepositoryId (terminate, security-group lifecycle,
+  # image deregistration and snapshot deletion among them; see docs/reference/aws-iam/).
   run_tags = {
     Name         = "packer-build-secure-rhel8"
     ManagedBy    = "aws-packer-framework"
@@ -128,14 +128,14 @@ ami_block_device_mappings = []
 
 # --- Surrogate Volume -------------------------------------------------------------------- #
 # Blank volume the STIG-partitioned image is assembled onto (see the second play in
-# rhel-8.yml). The framework's amazon-ebssurrogate source attaches it at device_name and
+# playbook.yml). The template's amazon-ebssurrogate source attaches it at device_name and
 # registers the AMI from it as ami_root_device_name. Builds select this path explicitly:
 # packer build -only=amazon-ebssurrogate.packer_image
 surrogate = {
   device_name          = "/dev/xvdf"
   ami_root_device_name = "/dev/sda1"
-  # UEFI/GPT layout with an EFI system partition and shim+grub2-efi (see rhel-8.yml play 2).
-  # The framework hard-blocks anything but "uefi".
+  # UEFI/GPT layout with an EFI system partition and shim+grub2-efi (see playbook.yml play 2).
+  # The template hard-blocks anything but "uefi".
   boot_mode   = "uefi"
   volume_size = 30
   volume_type = "gp3"
